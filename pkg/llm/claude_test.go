@@ -134,11 +134,9 @@ func TestClaudeChat(t *testing.T) {
 		t.Skip("ANTHROPIC_API_KEY not set")
 	}
 	provider := NewClaudeProvider()
-	resp, err := provider.Chat(
-		context.Background(),
-		[]Message{NewTextMessage(RoleUser, "Say hello in one word.")},
-		nil,
-	)
+	resp, err := provider.Chat(context.Background(), ChatParams{
+		Messages: []Message{NewTextMessage(RoleUser, "Say hello in one word.")},
+	})
 	if err != nil {
 		t.Fatalf("chat error: %v", err)
 	}
@@ -159,11 +157,10 @@ func TestClaudeChatToolUse(t *testing.T) {
 		WithModel(anthropic.ModelClaudeSonnet4_6),
 	}
 	provider := NewClaudeProvider(opts...)
-	resp, err := provider.Chat(
-		context.Background(),
-		[]Message{NewTextMessage(RoleUser, "What is the weather in Tokyo?")},
-		testTools,
-	)
+	resp, err := provider.Chat(context.Background(), ChatParams{
+		Messages: []Message{NewTextMessage(RoleUser, "What is the weather in Tokyo?")},
+		Tools:    testTools,
+	})
 	if err != nil {
 		t.Fatalf("chat error: %v", err)
 	}

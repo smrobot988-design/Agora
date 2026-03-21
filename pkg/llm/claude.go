@@ -78,8 +78,8 @@ func (p *ClaudeProvider) EstimateTokens(messages []Message) int {
 	return total
 }
 
-func (p *ClaudeProvider) Chat(ctx context.Context, messages []Message, tools []schema.ToolDefinition) (*Response, error) {
-	sdkMessages, err := convertMessagesToSDK(messages)
+func (p *ClaudeProvider) Chat(ctx context.Context, chatParams ChatParams) (*Response, error) {
+	sdkMessages, err := convertMessagesToSDK(chatParams.Messages)
 	if err != nil {
 		return nil, fmt.Errorf("convert messages: %w", err)
 	}
@@ -89,8 +89,13 @@ func (p *ClaudeProvider) Chat(ctx context.Context, messages []Message, tools []s
 		MaxTokens: p.maxTokens,
 		Messages:  sdkMessages,
 	}
-	if len(tools) > 0 {
-		params.Tools = convertToolsToSDK(tools)
+	if chatParams.System != "" {
+		params.System = []anthropic.TextBlockParam{
+			{Text: chatParams.System},
+		}
+	}
+	if len(chatParams.Tools) > 0 {
+		params.Tools = convertToolsToSDK(chatParams.Tools)
 	}
 
 	msg, err := p.client.Messages.New(ctx, params)

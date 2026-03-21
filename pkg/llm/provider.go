@@ -96,10 +96,17 @@ func (r *Response) TotalTokens() int {
 	return r.InputTokens + r.OutputTokens
 }
 
+// ChatParams holds all per-request parameters for a Chat call.
+type ChatParams struct {
+	System   string                `json:"system,omitempty"`
+	Messages []Message             `json:"messages"`
+	Tools    []schema.ToolDefinition `json:"tools,omitempty"`
+}
+
 // Provider is the unified interface for LLM providers.
 type Provider interface {
 	// Chat sends a conversation and returns the LLM response.
-	Chat(ctx context.Context, messages []Message, tools []schema.ToolDefinition) (*Response, error)
+	Chat(ctx context.Context, params ChatParams) (*Response, error)
 
 	// Name returns the provider name (for logging/tracing).
 	Name() string

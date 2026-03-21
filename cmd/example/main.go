@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/smrobot988-design/Agora/pkg/llm"
+	"github.com/smrobot988-design/Agora/pkg/memory"
 	"github.com/smrobot988-design/Agora/pkg/schema"
 )
 
@@ -35,8 +36,12 @@ func main() {
 		},
 	}
 
-	messages := []llm.Message{
-		llm.NewTextMessage(llm.RoleUser, "What's the weather in San Francisco?"),
+	// Use Memory to manage conversation history
+	mem := memory.New(
+		memory.WithSystemPrompt("You are a helpful weather assistant. Answer concisely."),
+	)
+	if err := mem.AddUserMessage("What's the weather in San Francisco?"); err != nil {
+		log.Fatalf("AddUserMessage error: %v", err)
 	}
 
 	ctx := context.Background()
@@ -44,16 +49,30 @@ func main() {
 	for turn := 1; turn <= 5; turn++ {
 		fmt.Printf("\n--- Turn %d ---\n", turn)
 
-		resp, err := provider.Chat(ctx, messages, tools)
+		msgs, err := mem.Messages()
+		if err != nil {
+			log.Fatalf("Messages error: %v", err)
+		}
+
+		resp, err := provider.Chat(ctx, llm.ChatParams{
+			System:   mem.SystemPrompt(),
+			Messages: msgs,
+			Tools:    tools,
+		})
 		if err != nil {
 			log.Fatalf("Chat error: %v", err)
 		}
 
 		fmt.Printf("Stop reason: %s\n", resp.StopReason)
-		fmt.Printf("Tokens: %d in / %d out\n", resp.InputTokens, resp.OutputTokens)
+		fmt.Printf("Tokens: %d in / %d out (total: %d)\n", resp.InputTokens, resp.OutputTokens, resp.TotalTokens())
 
 		if resp.Text != "" {
 			fmt.Printf("Text: %s\n", resp.Text)
+		}
+
+		// Add assistant response to memory
+		if err := mem.AddAssistantResponse(resp); err != nil {
+			log.Fatalf("AddAssistantResponse error: %v", err)
 		}
 
 		if resp.StopReason == llm.StopReasonEndTurn {
@@ -62,19 +81,6 @@ func main() {
 		}
 
 		if resp.StopReason == llm.StopReasonToolUse {
-			// Build assistant message with tool_use blocks
-			assistantBlocks := []llm.ContentBlock{}
-			if resp.Text != "" {
-				assistantBlocks = append(assistantBlocks, llm.ContentBlock{Type: llm.BlockText, Text: resp.Text})
-			}
-			for _, tc := range resp.ToolCalls {
-				assistantBlocks = append(assistantBlocks, llm.ContentBlock{
-					Type:     llm.BlockToolUse,
-					ToolCall: tc,
-				})
-			}
-			messages = append(messages, llm.Message{Role: llm.RoleAssistant, Content: assistantBlocks})
-
 			// Execute tools (stubbed) and build results
 			var results []llm.ToolResult
 			for _, tc := range resp.ToolCalls {
@@ -87,7 +93,13 @@ func main() {
 					Content:    result,
 				})
 			}
-			messages = append(messages, llm.NewToolResultMessage(results))
+			if err := mem.AddToolResult(results); err != nil {
+				log.Fatalf("AddToolResult error: %v", err)
+			}
 		}
 	}
+
+	// Show final conversation stats
+	n, _ := mem.Len()
+	fmt.Printf("\nConversation: %d messages in memory\n", n)
 }
