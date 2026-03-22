@@ -1,4 +1,4 @@
-package memory
+package trimmer
 
 import "github.com/smrobot988-design/Agora/pkg/llm"
 
@@ -12,16 +12,16 @@ type Trimmer interface {
 	Trim(messages []llm.Message) []llm.Message
 }
 
-// NoOpTrimmer performs no trimming (unlimited history). This is the default.
-type NoOpTrimmer struct{}
+// NoOp performs no trimming (unlimited history). This is the default.
+type NoOp struct{}
 
 // Trim returns messages unchanged.
-func (t *NoOpTrimmer) Trim(messages []llm.Message) []llm.Message {
+func (t *NoOp) Trim(messages []llm.Message) []llm.Message {
 	return messages
 }
 
-// SlidingWindowTrimmer keeps the most recent MaxMessages messages.
-type SlidingWindowTrimmer struct {
+// SlidingWindow keeps the most recent MaxMessages messages.
+type SlidingWindow struct {
 	// MaxMessages is the maximum number of messages to keep.
 	MaxMessages int
 	// PreserveFirst keeps the first message (often the initial user task)
@@ -30,7 +30,7 @@ type SlidingWindowTrimmer struct {
 }
 
 // Trim keeps the most recent messages within the window size.
-func (t *SlidingWindowTrimmer) Trim(messages []llm.Message) []llm.Message {
+func (t *SlidingWindow) Trim(messages []llm.Message) []llm.Message {
 	if len(messages) <= t.MaxMessages {
 		return messages
 	}
@@ -46,10 +46,10 @@ func (t *SlidingWindowTrimmer) Trim(messages []llm.Message) []llm.Message {
 	return messages[len(messages)-t.MaxMessages:]
 }
 
-// TokenBudgetTrimmer trims messages to fit within a token budget.
+// TokenBudget trims messages to fit within a token budget.
 // It requires a token estimation function, which can be provided
 // by the Agent from Provider.EstimateTokens.
-type TokenBudgetTrimmer struct {
+type TokenBudget struct {
 	// MaxTokens is the maximum token budget.
 	MaxTokens int
 	// EstimateTokens estimates the token count for a set of messages.
@@ -57,7 +57,7 @@ type TokenBudgetTrimmer struct {
 }
 
 // Trim drops the oldest messages (preserving the first) until under budget.
-func (t *TokenBudgetTrimmer) Trim(messages []llm.Message) []llm.Message {
+func (t *TokenBudget) Trim(messages []llm.Message) []llm.Message {
 	if t.EstimateTokens == nil || t.EstimateTokens(messages) <= t.MaxTokens {
 		return messages
 	}

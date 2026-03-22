@@ -2,26 +2,29 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 
+	"github.com/smrobot988-design/Agora/pkg/core"
 	"github.com/smrobot988-design/Agora/pkg/llm"
-	"github.com/smrobot988-design/Agora/pkg/memory"
 	"github.com/smrobot988-design/Agora/pkg/schema"
+	"github.com/smrobot988-design/Agora/pkg/tool"
 )
 
 func main() {
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("ANTHROPIC_API_KEY environment variable is required")
-	}
+	// if os.Getenv("ANTHROPIC_API_KEY") == "" {
+	// 	log.Fatal("ANTHROPIC_API_KEY environment variable is required")
+	// }
 
-	provider := llm.NewClaudeProvider()
+	opts := []llm.ClaudeOption{}
+
+	provider := llm.NewClaudeProvider(opts...)
 	fmt.Printf("Provider: %s\n", provider.Name())
 
-	tools := []schema.ToolDefinition{
-		{
+	// Register tools
+	registry := tool.NewRegistry()
+	if err := registry.Register(&tool.Func{
+		Def: schema.ToolDefinition{
 			Name:        "get_weather",
 			Description: "Get the current weather for a city",
 			InputSchema: schema.PropertySchema{
@@ -34,72 +37,33 @@ func main() {
 				Required: []string{"city"},
 			},
 		},
+		Handler: func(ctx context.Context, input map[string]interface{}) (string, error) {
+			city, _ := input["city"].(string)
+			return fmt.Sprintf(`{"city": %q, "temperature": "18°C", "condition": "partly cloudy", "humidity": "72%%"}`, city), nil
+		},
+	}); err != nil {
+		log.Fatalf("Register tool error: %v", err)
 	}
 
-	// Use Memory to manage conversation history
-	mem := memory.New(
-		memory.WithSystemPrompt("You are a helpful weather assistant. Answer concisely."),
+	// Create Memory with system prompt
+	mem := core.NewMemory(
+		core.WithSystemPrompt("You are a helpful weather assistant. Answer concisely."),
 	)
-	if err := mem.AddUserMessage("What's the weather in San Francisco?"); err != nil {
-		log.Fatalf("AddUserMessage error: %v", err)
-	}
+
+	// Create Agent and run
+	agent := core.NewAgent(provider, mem, registry, core.WithMaxTurns(5))
 
 	ctx := context.Background()
-
-	for turn := 1; turn <= 5; turn++ {
-		fmt.Printf("\n--- Turn %d ---\n", turn)
-
-		msgs, err := mem.Messages()
-		if err != nil {
-			log.Fatalf("Messages error: %v", err)
-		}
-
-		resp, err := provider.Chat(ctx, llm.ChatParams{
-			System:   mem.SystemPrompt(),
-			Messages: msgs,
-			Tools:    tools,
-		})
-		if err != nil {
-			log.Fatalf("Chat error: %v", err)
-		}
-
-		fmt.Printf("Stop reason: %s\n", resp.StopReason)
-		fmt.Printf("Tokens: %d in / %d out (total: %d)\n", resp.InputTokens, resp.OutputTokens, resp.TotalTokens())
-
-		if resp.Text != "" {
-			fmt.Printf("Text: %s\n", resp.Text)
-		}
-
-		// Add assistant response to memory
-		if err := mem.AddAssistantResponse(resp); err != nil {
-			log.Fatalf("AddAssistantResponse error: %v", err)
-		}
-
-		if resp.StopReason == llm.StopReasonEndTurn {
-			fmt.Println("\nDone.")
-			break
-		}
-
-		if resp.StopReason == llm.StopReasonToolUse {
-			// Execute tools (stubbed) and build results
-			var results []llm.ToolResult
-			for _, tc := range resp.ToolCalls {
-				inputJSON, _ := json.Marshal(tc.Input)
-				fmt.Printf("Tool call: %s(%s)\n", tc.Name, string(inputJSON))
-
-				result := `{"temperature": "18°C", "condition": "partly cloudy", "humidity": "72%"}`
-				results = append(results, llm.ToolResult{
-					ToolCallID: tc.ID,
-					Content:    result,
-				})
-			}
-			if err := mem.AddToolResult(results); err != nil {
-				log.Fatalf("AddToolResult error: %v", err)
-			}
-		}
+	result, err := agent.Run(ctx, "What's the weather in San Francisco?")
+	if err != nil {
+		log.Fatalf("Agent run error: %v", err)
 	}
 
-	// Show final conversation stats
+	fmt.Printf("\nResponse: %s\n", result.Text)
+	fmt.Printf("Tokens: %d in / %d out (total: %d)\n",
+		result.TotalInputTokens, result.TotalOutputTokens, result.TotalTokens())
+	fmt.Printf("Turns: %d\n", result.Turns)
+
 	n, _ := mem.Len()
-	fmt.Printf("\nConversation: %d messages in memory\n", n)
+	fmt.Printf("Conversation: %d messages in memory\n", n)
 }

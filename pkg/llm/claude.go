@@ -102,6 +102,8 @@ func (p *ClaudeProvider) Chat(ctx context.Context, chatParams ChatParams) (*Resp
 	if err != nil {
 		return nil, fmt.Errorf("claude api: %w", err)
 	}
+	// TODO: 待删除
+	fmt.Printf("\n\nCall Calude API \nResult:[%v] \nchatParams:[%v]\n\n", msg, chatParams)
 
 	return convertResponseFromSDK(msg), nil
 }

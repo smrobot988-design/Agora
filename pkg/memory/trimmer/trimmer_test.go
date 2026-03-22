@@ -1,4 +1,4 @@
-package memory
+package trimmer
 
 import (
 	"testing"
@@ -6,28 +6,28 @@ import (
 	"github.com/smrobot988-design/Agora/pkg/llm"
 )
 
-func TestNoOpTrimmer(t *testing.T) {
-	trimmer := &NoOpTrimmer{}
+func TestNoOp(t *testing.T) {
+	tr := &NoOp{}
 	msgs := []llm.Message{
 		llm.NewTextMessage(llm.RoleUser, "1"),
 		llm.NewTextMessage(llm.RoleAssistant, "2"),
 		llm.NewTextMessage(llm.RoleUser, "3"),
 	}
-	result := trimmer.Trim(msgs)
+	result := tr.Trim(msgs)
 	if len(result) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(result))
 	}
 }
 
-func TestSlidingWindowTrimmer(t *testing.T) {
-	trimmer := &SlidingWindowTrimmer{MaxMessages: 2}
+func TestSlidingWindow(t *testing.T) {
+	tr := &SlidingWindow{MaxMessages: 2}
 	msgs := []llm.Message{
 		llm.NewTextMessage(llm.RoleUser, "1"),
 		llm.NewTextMessage(llm.RoleAssistant, "2"),
 		llm.NewTextMessage(llm.RoleUser, "3"),
 		llm.NewTextMessage(llm.RoleAssistant, "4"),
 	}
-	result := trimmer.Trim(msgs)
+	result := tr.Trim(msgs)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(result))
 	}
@@ -39,20 +39,20 @@ func TestSlidingWindowTrimmer(t *testing.T) {
 	}
 }
 
-func TestSlidingWindowTrimmerUnderLimit(t *testing.T) {
-	trimmer := &SlidingWindowTrimmer{MaxMessages: 10}
+func TestSlidingWindowUnderLimit(t *testing.T) {
+	tr := &SlidingWindow{MaxMessages: 10}
 	msgs := []llm.Message{
 		llm.NewTextMessage(llm.RoleUser, "1"),
 		llm.NewTextMessage(llm.RoleAssistant, "2"),
 	}
-	result := trimmer.Trim(msgs)
+	result := tr.Trim(msgs)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(result))
 	}
 }
 
 func TestSlidingWindowPreserveFirst(t *testing.T) {
-	trimmer := &SlidingWindowTrimmer{MaxMessages: 3, PreserveFirst: true}
+	tr := &SlidingWindow{MaxMessages: 3, PreserveFirst: true}
 	msgs := []llm.Message{
 		llm.NewTextMessage(llm.RoleUser, "task"),
 		llm.NewTextMessage(llm.RoleAssistant, "2"),
@@ -60,7 +60,7 @@ func TestSlidingWindowPreserveFirst(t *testing.T) {
 		llm.NewTextMessage(llm.RoleAssistant, "4"),
 		llm.NewTextMessage(llm.RoleUser, "5"),
 	}
-	result := trimmer.Trim(msgs)
+	result := tr.Trim(msgs)
 	if len(result) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(result))
 	}
@@ -75,9 +75,9 @@ func TestSlidingWindowPreserveFirst(t *testing.T) {
 	}
 }
 
-func TestTokenBudgetTrimmer(t *testing.T) {
+func TestTokenBudget(t *testing.T) {
 	estimator := func(msgs []llm.Message) int { return len(msgs) * 100 }
-	trimmer := &TokenBudgetTrimmer{MaxTokens: 250, EstimateTokens: estimator}
+	tr := &TokenBudget{MaxTokens: 250, EstimateTokens: estimator}
 
 	msgs := []llm.Message{
 		llm.NewTextMessage(llm.RoleUser, "1"),
@@ -85,21 +85,21 @@ func TestTokenBudgetTrimmer(t *testing.T) {
 		llm.NewTextMessage(llm.RoleUser, "3"),
 		llm.NewTextMessage(llm.RoleAssistant, "4"),
 	}
-	result := trimmer.Trim(msgs)
+	result := tr.Trim(msgs)
 	if len(result) > 2 {
 		t.Fatalf("expected at most 2 messages to fit budget, got %d", len(result))
 	}
 }
 
-func TestTokenBudgetTrimmerUnderBudget(t *testing.T) {
+func TestTokenBudgetUnderBudget(t *testing.T) {
 	estimator := func(msgs []llm.Message) int { return len(msgs) * 10 }
-	trimmer := &TokenBudgetTrimmer{MaxTokens: 1000, EstimateTokens: estimator}
+	tr := &TokenBudget{MaxTokens: 1000, EstimateTokens: estimator}
 
 	msgs := []llm.Message{
 		llm.NewTextMessage(llm.RoleUser, "1"),
 		llm.NewTextMessage(llm.RoleAssistant, "2"),
 	}
-	result := trimmer.Trim(msgs)
+	result := tr.Trim(msgs)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 messages (under budget), got %d", len(result))
 	}

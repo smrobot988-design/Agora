@@ -1,46 +1,48 @@
-package memory
+package core
 
 import (
 	"fmt"
 	"sync"
 
 	"github.com/smrobot988-design/Agora/pkg/llm"
+	"github.com/smrobot988-design/Agora/pkg/memory/store"
+	"github.com/smrobot988-design/Agora/pkg/memory/trimmer"
 )
 
 // Memory manages conversation history for an Agent.
 type Memory struct {
 	mu           sync.RWMutex
 	systemPrompt string
-	store        Store
-	trimmer      Trimmer
+	store        store.Store
+	trimmer      trimmer.Trimmer
 }
 
-// Option configures Memory.
-type Option func(*Memory)
+// MemoryOption configures Memory.
+type MemoryOption func(*Memory)
 
 // WithSystemPrompt sets the initial system prompt.
-func WithSystemPrompt(prompt string) Option {
+func WithSystemPrompt(prompt string) MemoryOption {
 	return func(m *Memory) { m.systemPrompt = prompt }
 }
 
 // WithTrimmer sets the context window management strategy.
-func WithTrimmer(t Trimmer) Option {
+func WithTrimmer(t trimmer.Trimmer) MemoryOption {
 	return func(m *Memory) { m.trimmer = t }
 }
 
 // WithStore sets the storage backend for messages.
-// Default is MemoryStore (in-memory). Implement the Store interface
+// Default is store.InMemory (in-memory). Implement the store.Store interface
 // to persist messages to a database, Redis, file, etc.
-func WithStore(s Store) Option {
+func WithStore(s store.Store) MemoryOption {
 	return func(m *Memory) { m.store = s }
 }
 
-// New creates a new Memory with the given options.
-// Defaults to MemoryStore and NoOpTrimmer if not provided.
-func New(opts ...Option) *Memory {
+// NewMemory creates a new Memory with the given options.
+// Defaults to store.InMemory and trimmer.NoOp if not provided.
+func NewMemory(opts ...MemoryOption) *Memory {
 	m := &Memory{
-		store:   NewMemoryStore(),
-		trimmer: &NoOpTrimmer{},
+		store:   store.NewInMemory(),
+		trimmer: &trimmer.NoOp{},
 	}
 	for _, opt := range opts {
 		opt(m)

@@ -1,10 +1,13 @@
-package memory
+package core
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/smrobot988-design/Agora/pkg/llm"
+	"github.com/smrobot988-design/Agora/pkg/memory/store"
+	"github.com/smrobot988-design/Agora/pkg/memory/trimmer"
 	"github.com/smrobot988-design/Agora/pkg/schema"
 )
 
@@ -28,8 +31,8 @@ func mustMessages(t *testing.T, m *Memory) []llm.Message {
 	return msgs
 }
 
-func TestNewDefaults(t *testing.T) {
-	m := New()
+func TestNewMemoryDefaults(t *testing.T) {
+	m := NewMemory()
 	if mustLen(t, m) != 0 {
 		t.Fatalf("expected 0 messages, got %d", mustLen(t, m))
 	}
@@ -38,30 +41,30 @@ func TestNewDefaults(t *testing.T) {
 	}
 }
 
-func TestNewWithOptions(t *testing.T) {
-	m := New(
+func TestNewMemoryWithOptions(t *testing.T) {
+	m := NewMemory(
 		WithSystemPrompt("You are helpful."),
-		WithTrimmer(&SlidingWindowTrimmer{MaxMessages: 10}),
+		WithTrimmer(&trimmer.SlidingWindow{MaxMessages: 10}),
 	)
 	if m.SystemPrompt() != "You are helpful." {
 		t.Fatalf("expected system prompt, got %q", m.SystemPrompt())
 	}
 }
 
-func TestNewWithStore(t *testing.T) {
-	store := NewMemoryStore()
-	m := New(WithStore(store))
+func TestNewMemoryWithStore(t *testing.T) {
+	s := store.NewInMemory()
+	m := NewMemory(WithStore(s))
 	if err := m.AddUserMessage("hello"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	n, _ := store.Len()
+	n, _ := s.Len()
 	if n != 1 {
 		t.Fatalf("expected 1 message in store, got %d", n)
 	}
 }
 
 func TestAddUserMessage(t *testing.T) {
-	m := New()
+	m := NewMemory()
 	if err := m.AddUserMessage("hello"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -78,7 +81,7 @@ func TestAddUserMessage(t *testing.T) {
 }
 
 func TestAddAssistantMessage(t *testing.T) {
-	m := New()
+	m := NewMemory()
 	if err := m.AddAssistantMessage("hi there"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +98,7 @@ func TestAddAssistantMessage(t *testing.T) {
 }
 
 func TestAddAssistantResponse(t *testing.T) {
-	m := New()
+	m := NewMemory()
 	resp := &llm.Response{
 		Text: "Let me check the weather.",
 		ToolCalls: []schema.ToolCall{
@@ -125,7 +128,7 @@ func TestAddAssistantResponse(t *testing.T) {
 }
 
 func TestAddAssistantResponseTextOnly(t *testing.T) {
-	m := New()
+	m := NewMemory()
 	resp := &llm.Response{Text: "Hello!"}
 	if err := m.AddAssistantResponse(resp); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -140,7 +143,7 @@ func TestAddAssistantResponseTextOnly(t *testing.T) {
 }
 
 func TestAddAssistantResponseToolCallsOnly(t *testing.T) {
-	m := New()
+	m := NewMemory()
 	resp := &llm.Response{
 		ToolCalls: []schema.ToolCall{
 			{ID: "call_1", Name: "read_file", Input: map[string]interface{}{"path": "/tmp/test"}},
@@ -159,7 +162,7 @@ func TestAddAssistantResponseToolCallsOnly(t *testing.T) {
 }
 
 func TestAddToolResult(t *testing.T) {
-	m := New()
+	m := NewMemory()
 	if err := m.AddToolResult([]llm.ToolResult{
 		{ToolCallID: "call_1", Content: `{"temp": "20°C"}`, IsError: false},
 	}); err != nil {
@@ -178,7 +181,7 @@ func TestAddToolResult(t *testing.T) {
 }
 
 func TestMessagesReturnsCopy(t *testing.T) {
-	m := New()
+	m := NewMemory()
 	_ = m.AddUserMessage("hello")
 	msgs := mustMessages(t, m)
 	msgs[0] = llm.NewTextMessage(llm.RoleAssistant, "tampered")
@@ -189,7 +192,7 @@ func TestMessagesReturnsCopy(t *testing.T) {
 }
 
 func TestSystemPrompt(t *testing.T) {
-	m := New()
+	m := NewMemory()
 	m.SetSystemPrompt("You are a coding assistant.")
 	if m.SystemPrompt() != "You are a coding assistant." {
 		t.Fatalf("expected system prompt, got %q", m.SystemPrompt())
@@ -197,7 +200,7 @@ func TestSystemPrompt(t *testing.T) {
 }
 
 func TestClear(t *testing.T) {
-	m := New(WithSystemPrompt("keep me"))
+	m := NewMemory(WithSystemPrompt("keep me"))
 	_ = m.AddUserMessage("hello")
 	_ = m.AddAssistantMessage("hi")
 	if err := m.Clear(); err != nil {
@@ -212,7 +215,7 @@ func TestClear(t *testing.T) {
 }
 
 func TestReset(t *testing.T) {
-	m := New(WithSystemPrompt("remove me"))
+	m := NewMemory(WithSystemPrompt("remove me"))
 	_ = m.AddUserMessage("hello")
 	if err := m.Reset(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -226,7 +229,7 @@ func TestReset(t *testing.T) {
 }
 
 func TestConversationFlow(t *testing.T) {
-	m := New(WithSystemPrompt("You are helpful."))
+	m := NewMemory(WithSystemPrompt("You are helpful."))
 	_ = m.AddUserMessage("What's the weather?")
 	_ = m.AddAssistantResponse(&llm.Response{
 		StopReason: llm.StopReasonToolUse,
@@ -251,7 +254,7 @@ func TestConversationFlow(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	m := New()
+	m := NewMemory()
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(2)
@@ -267,5 +270,36 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Wait()
 	if mustLen(t, m) != 100 {
 		t.Fatalf("expected 100 messages, got %d", mustLen(t, m))
+	}
+}
+
+// failingStore is a test helper that always returns errors.
+type failingStore struct{}
+
+func (s *failingStore) Append(msg llm.Message) error     { return fmt.Errorf("append failed") }
+func (s *failingStore) Messages() ([]llm.Message, error)  { return nil, fmt.Errorf("messages failed") }
+func (s *failingStore) Len() (int, error)                 { return 0, fmt.Errorf("len failed") }
+func (s *failingStore) Clear() error                      { return fmt.Errorf("clear failed") }
+
+func TestStoreErrorPropagation(t *testing.T) {
+	m := NewMemory(WithStore(&failingStore{}))
+
+	if err := m.AddUserMessage("hello"); err == nil {
+		t.Fatal("expected error from failing store")
+	}
+	if _, err := m.Messages(); err == nil {
+		t.Fatal("expected error from failing store")
+	}
+	if _, err := m.AllMessages(); err == nil {
+		t.Fatal("expected error from failing store")
+	}
+	if _, err := m.Len(); err == nil {
+		t.Fatal("expected error from failing store")
+	}
+	if err := m.Clear(); err == nil {
+		t.Fatal("expected error from failing store")
+	}
+	if err := m.Reset(); err == nil {
+		t.Fatal("expected error from failing store")
 	}
 }
