@@ -40,6 +40,34 @@ func (a *Agent) runLoop(ctx context.Context, result *Result) (*Result, error) {
 			return nil, fmt.Errorf("provider chat (turn %d): %w", turn, err)
 		}
 
+		// Log LLM response details.
+		slog.Info("LLM response",
+			"turn", turn,
+			"stop_reason", resp.StopReason,
+			"input_tokens", resp.InputTokens,
+			"output_tokens", resp.OutputTokens,
+		)
+		if resp.Text != "" {
+			slog.Info("LLM text output",
+				"turn", turn,
+				"text", resp.Text,
+			)
+		}
+		if len(resp.ToolCalls) > 0 {
+			slog.Info("LLM requested tools",
+				"turn", turn,
+				"tool_count", len(resp.ToolCalls),
+			)
+			for _, tc := range resp.ToolCalls {
+				slog.Info("tool call",
+					"turn", turn,
+					"tool", tc.Name,
+					"call_id", tc.ID,
+					"input", tc.Input,
+				)
+			}
+		}
+
 		// Accumulate token usage.
 		result.TotalInputTokens += resp.InputTokens
 		result.TotalOutputTokens += resp.OutputTokens
@@ -63,6 +91,25 @@ func (a *Agent) runLoop(ctx context.Context, result *Result) (*Result, error) {
 			if err != nil {
 				return nil, fmt.Errorf("execute tools (turn %d): %w", turn, err)
 			}
+
+			// Log tool results before feeding back to LLM.
+			for _, tr := range toolResults {
+				isError := ""
+				if tr.IsError {
+					isError = " [error]"
+				}
+				// Truncate long output for log readability.
+				content := tr.Content
+				if len(content) > 200 {
+					content = content[:200] + "... [truncated]"
+				}
+				slog.Info("tool result" + isError,
+					"turn", turn,
+					"call_id", tr.ToolCallID,
+					"output", content,
+				)
+			}
+
 			if err := a.memory.AddToolResult(toolResults); err != nil {
 				return nil, fmt.Errorf("add tool results: %w", err)
 			}

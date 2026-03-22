@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -102,8 +103,10 @@ func (p *ClaudeProvider) Chat(ctx context.Context, chatParams ChatParams) (*Resp
 	if err != nil {
 		return nil, fmt.Errorf("claude api: %w", err)
 	}
-	// TODO: 待删除
-	fmt.Printf("\n\nCall Calude API \nResult:[%v] \nchatParams:[%v]\n\n", msg, chatParams)
+	slog.Debug("claude api response",
+		"stop_reason", msg.StopReason,
+		"input_tokens", msg.Usage.InputTokens,
+		"output_tokens", msg.Usage.OutputTokens)
 
 	return convertResponseFromSDK(msg), nil
 }
