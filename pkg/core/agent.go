@@ -3,7 +3,9 @@ package core
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/smrobot988-design/Agora/pkg/core/trace"
 	"github.com/smrobot988-design/Agora/pkg/llm"
 	"github.com/smrobot988-design/Agora/pkg/tool"
 )
@@ -14,11 +16,14 @@ const defaultMaxTurns = 10
 // Agent ties together a Provider, Memory, tool Registry, and Router
 // to execute agentic loops.
 type Agent struct {
-	provider llm.Provider
-	memory   *Memory
-	registry *tool.Registry
-	router   *Router
-	maxTurns int
+	provider      llm.Provider
+	memory       *Memory
+	registry     *tool.Registry
+	router       *Router
+	maxTurns     int
+	tracer       *Tracer
+	loopDetector *LoopDetector
+	summarizer   *Summarizer
 }
 
 // AgentOption configures an Agent.
@@ -27,6 +32,27 @@ type AgentOption func(*Agent)
 // WithMaxTurns sets the maximum number of LLM call iterations.
 func WithMaxTurns(n int) AgentOption {
 	return func(a *Agent) { a.maxTurns = n }
+}
+
+// WithTracer enables trace recording with the given exporter (nil = JSONExporter).
+func WithTracer(exporter trace.Exporter) AgentOption {
+	return func(a *Agent) {
+		a.tracer = NewTracer(a.provider.Name(), exporter)
+	}
+}
+
+// WithLoopDetector enables loop detection with the default threshold.
+func WithLoopDetector() AgentOption {
+	return func(a *Agent) {
+		a.loopDetector = NewLoopDetector()
+	}
+}
+
+// WithSummarizer enables structured run summary logging.
+func WithSummarizer() AgentOption {
+	return func(a *Agent) {
+		a.summarizer = NewSummarizer()
+	}
 }
 
 // NewAgent creates an Agent with the given provider, memory, registry, and options.
@@ -53,5 +79,22 @@ func (a *Agent) Run(ctx context.Context, input string) (*Result, error) {
 	}
 
 	result := &Result{}
-	return a.runLoop(ctx, result)
+	summary := &RunSummary{StartTime: time.Now()}
+
+	finalResult, runErr := a.runLoop(ctx, result, summary)
+
+	if a.tracer != nil {
+		a.tracer.FinalizeSnapshot(finalResult)
+		if err := a.tracer.Flush(); err != nil {
+			// Flush failure is non-fatal; log and continue.
+			_ = err
+		}
+	}
+	if a.summarizer != nil {
+		summary.totalInputTokens = finalResult.TotalInputTokens
+		summary.totalOutputTokens = finalResult.TotalOutputTokens
+		a.summarizer.Log(ctx, summary)
+	}
+
+	return finalResult, runErr
 }

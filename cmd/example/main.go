@@ -16,7 +16,10 @@ func main() {
 	// 	log.Fatal("ANTHROPIC_API_KEY environment variable is required")
 	// }
 
-	opts := []llm.ClaudeOption{}
+	opts := []llm.ClaudeOption{
+		llm.WithAPIKey("sk-vjOlgFlvaLKZjJI3a1znNm97jzbIrTPJ7qOdJZrxdil0MYxs"),
+		llm.WithBaseURL("https://api.ccodezh.com"),
+	}
 
 	provider := llm.NewClaudeProvider(opts...)
 	fmt.Printf("Provider: %s\n", provider.Name())
