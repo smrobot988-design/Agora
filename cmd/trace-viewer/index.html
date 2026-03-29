@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agora Trace Viewer</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #fafbfc;
+  color: #1c1c2e;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  background: #fff;
+  padding: 10px 20px;
+  border-bottom: 1px solid #e4e7ec;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+header h1 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #4338ca;
+}
+
+.file-input { display: flex; align-items: center; gap: 8px; }
+.file-input label { font-size: 13px; color: #64748b; }
+.file-input input[type="file"] {
+  font-size: 13px;
+  color: #1c1c2e;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.file-input input[type="file"]:hover { border-color: #4338ca; }
+
+.summary-bar {
+  display: flex;
+  gap: 20px;
+  margin-left: auto;
+  font-size: 12px;
+  color: #64748b;
+}
+.summary-bar span { display: flex; align-items: center; gap: 5px; }
+.summary-bar .v { color: #4338ca; font-weight: 600; }
+
+/* ── Main ── */
+main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Left panel ── */
+.timeline-panel {
+  width: 62%;
+  min-width: 480px;
+  background: #fff;
+  border-right: 1px solid #e4e7ec;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tl-top-bar {
+  background: #f8fafc;
+  border-bottom: 1px solid #e4e7ec;
+  padding: 6px 0;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.tl-axis {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  position: relative;
+  padding: 0 16px;
+  font-size: 11px;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.tl-axis-label {
+  position: absolute;
+  left: 16px;
+  font-size: 10px;
+  color: #c0c8d8;
+  letter-spacing: 0.03em;
+}
+
+.tl-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.tl-tick-line {
+  width: 1px;
+  background: #e4e7ec;
+  height: 6px;
+}
+
+.tl-tick-label {
+  font-size: 10px;
+  color: #c0c8d8;
+  margin-top: 2px;
+}
+
+.tl-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.tl-row {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: background 0.1s;
+}
+.tl-row:hover { background: #f5f3ff; }
+.tl-row.selected { background: #ede9fe; }
+.tl-row.selected .tl-bar { filter: brightness(0.92); }
+
+.tl-row-left {
+  width: 200px;
+  min-width: 200px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.tl-depth-ctrl {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.1s;
+  font-size: 10px;
+  color: #94a3b8;
+}
+.tl-depth-ctrl:hover { background: #e4e7ec; }
+.tl-depth-ctrl.expanded::after { content: '▼'; }
+.tl-depth-ctrl.collapsed::after { content: '▶'; }
+
+.tl-row-name {
+  font-size: 13px;
+  color: #1c1c2e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tl-row-right {
+  flex: 1;
+  position: relative;
+  height: 100%;
+  padding: 0 4px;
+}
+
+.tl-bar {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: pointer;
+  transition: filter 0.15s;
+  min-width: 3px;
+}
+.tl-bar:hover { filter: brightness(0.93); }
+
+.tl-bar.llm { background: #3b82f6; }
+.tl-bar.tool { background: #22c55e; }
+.tl-bar.agent { background: #a855f7; }
+.tl-bar.error { background: #ef4444; }
+
+.tl-bar-label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.9);
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.tl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #94a3b8;
+  gap: 10px;
+  font-size: 14px;
+}
+
+/* Kind dot */
+.kind-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.kind-dot.llm { background: #3b82f6; }
+.kind-dot.tool { background: #22c55e; }
+.kind-dot.agent { background: #a855f7; }
+.kind-dot.error { background: #ef4444; }
+
+/* Badge */
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.badge-llm { background: #dbeafe; color: #1d4ed8; }
+.badge-tool { background: #dcfce7; color: #15803d; }
+.badge-agent { background: #f3e8ff; color: #7e22ce; }
+.badge-error { background: #fee2e2; color: #b91c1c; }
+
+/* ── Right panel ── */
+.detail-panel {
+  flex: 1;
+  overflow-y: auto;
+  background: #fff;
+}
+
+.detail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #94a3b8;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.detail-header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.detail-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1c1c2e;
+  margin-bottom: 8px;
+}
+.detail-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #64748b;
+  flex-wrap: wrap;
+}
+.detail-meta span { display: flex; gap: 4px; }
+.detail-meta strong { color: #1c1c2e; }
+
+.detail-section {
+  padding: 16px 24px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.detail-section h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.kv { display: flex; gap: 16px; margin-bottom: 7px; font-size: 13px; }
+.kv .k { color: #64748b; min-width: 110px; }
+.kv .v { color: #334155; font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 12px; word-break: break-all; }
+.kv .v.err { color: #dc2626; }
+
+.json-box {
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 6px;
+  padding: 12px;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 240px;
+  overflow-y: auto;
+  color: #334155;
+}
+.json-key { color: #7c3aed; }
+.json-string { color: #15803d; }
+.json-number { color: #b45309; }
+.json-bool { color: #1d4ed8; }
+.json-null { color: #94a3b8; }
+
+.output-box {
+  background: #f8fafc;
+  border: 1px solid #e4e7ec;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  color: #334155;
+}
+.output-box.tool-error { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.output-box.tool-ok { border-color: #bbf7d0; background: #f0fdf4; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #e4e7ec; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Agora Trace Viewer</h1>
+  <div class="file-input">
+    <label>加载 trace:</label>
+    <input type="file" id="fileInput" accept=".json">
+  </div>
+  <div class="summary-bar" id="summaryBar" style="display:none">
+    <span>Agent: <span class="v" id="sAgent">-</span></span>
+    <span>Turns: <span class="v" id="sTurns">-</span></span>
+    <span>Spans: <span class="v" id="sSpans">-</span></span>
+    <span>Duration: <span class="v" id="sDur">-</span></span>
+    <span>In: <span class="v" id="sIn">-</span></span>
+    <span>Out: <span class="v" id="sOut">-</span></span>
+  </div>
+</header>
+
+<main>
+  <div class="timeline-panel">
+    <!-- Time axis -->
+    <div class="tl-top-bar">
+      <div class="tl-axis" id="tlAxis">
+        <span class="tl-axis-label">ms</span>
+      </div>
+    </div>
+    <!-- Rows -->
+    <div class="tl-body" id="tlBody">
+      <div class="tl-empty">📂 选择一个 trace JSON 文件</div>
+    </div>
+  </div>
+
+  <div class="detail-panel" id="detailPanel">
+    <div class="detail-empty">🔍 点击左侧条目查看详情</div>
+  </div>
+</main>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const tlBody   = document.getElementById('tlBody');
+const tlAxis   = document.getElementById('tlAxis');
+const detailPanel = document.getElementById('detailPanel');
+const summaryBar  = document.getElementById('summaryBar');
+
+let trace = null;
+let selectedId = null;
+
+// ── Load file ──────────────────────────────────────────────────────────────────
+fileInput.addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    trace = JSON.parse(await file.text());
+    renderAll();
+  } catch(err) {
+    alert('解析失败: ' + err.message);
+  }
+});
+
+// ── Main render ────────────────────────────────────────────────────────────────
+function renderAll() {
+  renderSummary();
+  buildTree();
+  renderAxis();
+  renderRows();
+}
+
+// ── Infer tree from timing data ────────────────────────────────────────────────
+let spanTree = [];
+let nodeMap  = {};
+
+function buildTree() {
+  const spans = trace.spans;
+  const traceStart = new Date(trace.start_time).getTime();
+  const traceEnd   = new Date(trace.end_time).getTime();
+
+  // Attach timing
+  spans.forEach(s => {
+    s._start = new Date(s.start_time).getTime() - traceStart;
+    s._end   = new Date(s.end_time).getTime()   - traceStart;
+    s._children = [];
+    nodeMap[s.span_id] = s;
+  });
+
+  // Nest spans based on actual time containment
+  spans.forEach(s => {
+    s._children = spans.filter(c => {
+      if (c.span_id === s.span_id) return false;
+      // c is child of s if c's interval is strictly inside s's
+      return c._start >= s._start && c._end <= s._end &&
+             (c._start > s._start || c._end < s._end);
+    });
+  });
+
+  // Root = spans not contained in any other
+  spanTree = spans.filter(s => {
+    const parent = spans.find(p => p !== s && s._start >= p._start && s._end <= p._end && (s._start > p._start || s._end < p._end));
+    return !parent;
+  }).sort((a, b) => a._start - b._start);
+}
+
+// ── Time axis ──────────────────────────────────────────────────────────────────
+function renderAxis() {
+  const spans = trace.spans;
+  const traceStart = new Date(trace.start_time).getTime();
+  const traceEnd   = new Date(trace.end_time).getTime();
+  const total      = traceEnd - traceStart || 1;
+
+  const axisMs = [0, 100, 500, 1000, 2000, 5000, 10000, 20000, 30000]
+    .filter(t => t <= total * 1.1)
+    .concat([total]);
+
+  // Choose ~6 nice ticks
+  const step = total / 5;
+  const mag = Math.pow(10, Math.floor(Math.log10(step)));
+  const norm = [1, 2, 5, 10].find(n => n * mag >= step) * mag;
+  const ticks = [];
+  for (let t = 0; t <= total; t += norm) ticks.push(t);
+  if (ticks[ticks.length - 1] !== total) ticks.push(total);
+
+  let html = '<span class="tl-axis-label">ms</span>';
+  ticks.forEach(t => {
+    const left = (t / total * 100).toFixed(3);
+    html += `<div class="tl-tick" style="left:${left}%">
+      <div class="tl-tick-line"></div>
+      <div class="tl-tick-label">${fmtMs(t)}</div>
+    </div>`;
+  });
+  tlAxis.innerHTML = html;
+}
+
+// ── Render rows ────────────────────────────────────────────────────────────────
+let collapsed = new Set();
+
+function renderRows() {
+  const traceStart = new Date(trace.start_time).getTime();
+  const traceEnd   = new Date(trace.end_time).getTime();
+  const total      = traceEnd - traceStart || 1;
+
+  let html = '';
+  spanTree.forEach(node => { html += renderNode(node, 0, total); });
+  tlBody.innerHTML = html;
+}
+
+function renderNode(node, depth, total) {
+  const id   = node.span_id;
+  const left = (node._start / total * 100).toFixed(3);
+  const wide = Math.max((node._duration / total * 100).toFixed(3), 0.3);
+  const isCollapsed = collapsed.has(id);
+  const isErr = !!(node.tool_error || node.error);
+  const kind  = isErr ? 'error' : (node.kind || 'agent');
+
+  const depthCtrl = node._children.length > 0
+    ? `<div class="tl-depth-ctrl ${isCollapsed ? 'collapsed' : 'expanded'}"
+         onclick="event.stopPropagation(); toggleCollapse('${id}')"></div>`
+    : `<div style="width:16px;flex-shrink:0"></div>`;
+
+  let html = `
+    <div class="tl-row ${selectedId === id ? 'selected' : ''}"
+         data-id="${id}"
+         onclick="select('${id}')"
+         style="padding-left:${12 + depth * 18}px">
+      <div class="tl-row-left">
+        ${depthCtrl}
+        <div class="kind-dot ${kind}"></div>
+        <span class="tl-row-name">${escHtml(node.name || node.tool_name || '?')}</span>
+      </div>
+      <div class="tl-row-right">
+        <div class="tl-bar ${kind}"
+             style="left:${left}%;width:${wide}%"
+             onclick="event.stopPropagation(); select('${id}')">
+          <span class="tl-bar-label">${fmtMs(node._duration)}</span>
+        </div>
+      </div>
+    </div>`;
+
+  if (!isCollapsed) {
+    node._children
+      .sort((a, b) => a._start - b._start)
+      .forEach(child => { html += renderNode(child, depth + 1, total); });
+  }
+
+  return html;
+}
+
+function toggleCollapse(id) {
+  if (collapsed.has(id)) collapsed.delete(id);
+  else collapsed.add(id);
+  renderRows();
+}
+
+// ── Select ─────────────────────────────────────────────────────────────────────
+function select(id) {
+  selectedId = id;
+  document.querySelectorAll('.tl-row').forEach(el =>
+    el.classList.toggle('selected', el.dataset.id === id)
+  );
+  const span = trace.spans.find(s => s.span_id === id);
+  if (span) renderDetail(span);
+}
+
+function renderDetail(s) {
+  const isErr = !!(s.tool_error || s.error);
+  const kind  = isErr ? 'error' : (s.kind || 'agent');
+
+  let h = `
+    <div class="detail-header">
+      <h2>${escHtml(s.name || s.tool_name || '?')}</h2>
+      <div class="detail-meta">
+        <span>Kind: <strong>${kind}</strong></span>
+        <span>Duration: <strong>${fmtMs(new Date(s.end_time) - new Date(s.start_time))}</strong></span>
+        <span>Start: <strong>${fmtTs(s.start_time)}</strong></span>
+        <span>End: <strong>${fmtTs(s.end_time)}</strong></span>
+        ${s.span_id ? `<span>SpanID: <strong style="font-size:11px">${s.span_id}</strong></span>` : ''}
+      </div>
+    </div>`;
+
+  if (s.kind === 'llm') {
+    h += `<div class="detail-section"><h3>Token Usage</h3>
+      <div class="kv"><span class="k">Input Tokens</span><span class="v">${s.input_tokens ?? '-'}</span></div>
+      <div class="kv"><span class="k">Output Tokens</span><span class="v">${s.output_tokens ?? '-'}</span></div>
+      <div class="kv"><span class="k">Stop Reason</span><span class="v">${s.stop_reason ? escHtml(s.stop_reason) : '-'}</span></div>
+    </div>`;
+  }
+
+  if (s.kind === 'tool') {
+    if (s.tool_name) {
+      h += `<div class="detail-section"><h3>Tool</h3>
+        <div class="kv"><span class="k">Name</span><span class="v">${escHtml(s.tool_name)}</span></div>
+      </div>`;
+    }
+    if (s.tool_input) {
+      h += `<div class="detail-section"><h3>Input</h3><div class="json-box">${syntax(s.tool_input)}</div></div>`;
+    }
+    if (s.tool_output) {
+      h += `<div class="detail-section"><h3>Output</h3>
+        <div class="output-box ${s.tool_error ? 'tool-error' : 'tool-ok'}">${escHtml(s.tool_output)}</div></div>`;
+    }
+    if (s.tool_error) {
+      h += `<div class="detail-section"><h3>Error</h3><div class="output-box tool-error">${escHtml(s.tool_error)}</div></div>`;
+    }
+  }
+
+  if (s.error) {
+    h += `<div class="detail-section"><h3>Error</h3><div class="output-box tool-error">${escHtml(s.error)}</div></div>`;
+  }
+
+  h += `<div class="detail-section"><h3>Raw JSON</h3><div class="json-box">${syntax(s)}</div></div>`;
+  detailPanel.innerHTML = h;
+}
+
+// ── Summary ───────────────────────────────────────────────────────────────────
+function renderSummary() {
+  summaryBar.style.display = 'flex';
+  $('sAgent').textContent = trace.agent_name || '-';
+  $('sTurns').textContent = trace.result?.turns ?? '-';
+  $('sSpans').textContent = trace.spans?.length ?? 0;
+  $('sDur').textContent   = fmtMs(trace.duration_ms);
+  $('sIn').textContent   = trace.result?.total_input_tokens ?? '-';
+  $('sOut').textContent  = trace.result?.total_output_tokens ?? '-';
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function fmtMs(ms) {
+  if (ms == null) return '-';
+  if (ms < 1000)   return ms.toFixed(0) + 'ms';
+  if (ms < 60000)  return (ms / 1000).toFixed(2) + 's';
+  return (ms / 60000).toFixed(1) + 'm';
+}
+
+function fmtTs(iso) {
+  if (!iso) return '-';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('zh-CN', {hour12:false}) + '.' + String(d.getMilliseconds()).padStart(3,'0');
+  } catch { return iso; }
+}
+
+function escHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+function syntax(obj) {
+  const json = JSON.stringify(obj, null, 2);
+  return json.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    match => {
+      let cls = 'json-number';
+      if (/^"/.test(match)) {
+        if (/:$/.test(match)) {
+          cls = 'json-key';
+          match = match.replace(/:$/,'');
+          return '<span class="' + cls + '">' + escHtml(match) + '</span>:';
+        }
+        cls = 'json-string';
+      } else if (/true|false/.test(match)) { cls = 'json-bool'; }
+      else if (/null/.test(match)) { cls = 'json-null'; }
+      return '<span class="' + cls + '">' + escHtml(match) + '</span>';
+    }
+  );
+}
+
+function $(id) { return document.getElementById(id); }
+</script>
+</body>
+</html>
