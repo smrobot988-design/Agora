@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
+	_ "github.com/smrobot988-design/Agora/pkg/config"
 	"github.com/smrobot988-design/Agora/pkg/core"
 	"github.com/smrobot988-design/Agora/pkg/llm"
 	"github.com/smrobot988-design/Agora/pkg/schema"
@@ -16,9 +18,15 @@ func main() {
 	// 	log.Fatal("ANTHROPIC_API_KEY environment variable is required")
 	// }
 
-	opts := []llm.ClaudeOption{
-		llm.WithAPIKey("sk-vjOlgFlvaLKZjJI3a1znNm97jzbIrTPJ7qOdJZrxdil0MYxs"),
-		llm.WithBaseURL("https://api.ccodezh.com"),
+	opts := []llm.ClaudeOption{}
+	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+		opts = append(opts, llm.WithAPIKey(apiKey))
+	}
+	if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
+		opts = append(opts, llm.WithBaseURL(baseURL))
+	}
+	if len(opts) == 0 {
+		log.Fatal("ANTHROPIC_API_KEY environment variable is required")
 	}
 
 	provider := llm.NewClaudeProvider(opts...)

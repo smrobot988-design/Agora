@@ -2,11 +2,88 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
 	"github.com/smrobot988-design/Agora/pkg/llm"
+	"github.com/smrobot988-design/Agora/pkg/schema"
 )
+
+// streamAccumulator collects streaming events into a complete *llm.Response.
+type streamAccumulator struct {
+	text       string
+	toolCalls  map[int]*accumulatedToolCall
+	inputTokens  int
+	outputTokens int
+	stopReason  llm.StopReason
+}
+
+type accumulatedToolCall struct {
+	id       string
+	name     string
+	arguments string
+}
+
+func newStreamAccumulator() *streamAccumulator {
+	return &streamAccumulator{
+		toolCalls: make(map[int]*accumulatedToolCall),
+	}
+}
+
+func (acc *streamAccumulator) onEvent(event *llm.PartialResponse) {
+	if event == nil {
+		return
+	}
+	switch event.Type {
+	case llm.StreamEventTextDelta:
+		acc.text += event.TextDelta
+	case llm.StreamEventToolDelta:
+		if event.ToolCallDelta == nil {
+			break
+		}
+		tc := acc.toolCalls[event.ToolCallDelta.Index]
+		if tc == nil {
+			tc = &accumulatedToolCall{}
+			acc.toolCalls[event.ToolCallDelta.Index] = tc
+		}
+		if event.ToolCallDelta.ID != "" {
+			tc.id = event.ToolCallDelta.ID
+		}
+		if event.ToolCallDelta.Name != "" {
+			tc.name = event.ToolCallDelta.Name
+		}
+		tc.arguments += event.ToolCallDelta.ArgumentsDelta
+	case llm.StreamEventStop:
+		acc.stopReason = event.StopReason
+	case llm.StreamEventUsage:
+		acc.inputTokens = event.InputTokens
+		acc.outputTokens = event.OutputTokens
+	}
+}
+
+func (acc *streamAccumulator) toResponse() *llm.Response {
+	// Sort tool calls by index
+	sorted := make([]schema.ToolCall, 0, len(acc.toolCalls))
+	for i := 0; i < len(acc.toolCalls); i++ {
+		if tc, ok := acc.toolCalls[i]; ok {
+			var input map[string]interface{}
+			json.Unmarshal([]byte(tc.arguments), &input)
+			sorted = append(sorted, schema.ToolCall{
+				ID:    tc.id,
+				Name:  tc.name,
+				Input: input,
+			})
+		}
+	}
+	return &llm.Response{
+		StopReason:   acc.stopReason,
+		Text:         acc.text,
+		ToolCalls:    sorted,
+		InputTokens:  acc.inputTokens,
+		OutputTokens: acc.outputTokens,
+	}
+}
 
 // runLoop is the core agent loop. It repeatedly calls the LLM, routes the
 // response, and executes tools until a final answer is produced or the
@@ -38,11 +115,37 @@ func (a *Agent) runLoop(ctx context.Context, result *Result, summary *RunSummary
 			llmSpan = a.tracer.StartLLMSpan()
 		}
 
-		resp, err = a.provider.Chat(ctx, llm.ChatParams{
-			System:   a.memory.SystemPrompt(),
-			Messages: msgs,
-			Tools:    a.registry.Definitions(),
-		})
+		if a.streamCallback != nil {
+			// Streaming path: accumulate events into a complete response.
+			accum := newStreamAccumulator()
+			wrappedCb := func(event *llm.PartialResponse) {
+				accum.onEvent(event)
+				a.streamCallback(event)
+			}
+			err = a.provider.ChatStream(ctx, llm.ChatParams{
+				System:   a.memory.SystemPrompt(),
+				Messages: msgs,
+				Tools:    a.registry.Definitions(),
+			}, wrappedCb)
+			if err == llm.ErrStreamingUnsupported {
+				// Fall back to non-streaming Chat.
+				resp, err = a.provider.Chat(ctx, llm.ChatParams{
+					System:   a.memory.SystemPrompt(),
+					Messages: msgs,
+					Tools:    a.registry.Definitions(),
+				})
+			} else if err != nil {
+				// Streaming error.
+			} else {
+				resp = accum.toResponse()
+			}
+		} else {
+			resp, err = a.provider.Chat(ctx, llm.ChatParams{
+				System:   a.memory.SystemPrompt(),
+				Messages: msgs,
+				Tools:    a.registry.Definitions(),
+			})
+		}
 		// End span before error check: error is recorded inside EndLLM.
 		if a.tracer != nil && llmSpan != nil {
 			llmSpan.EndLLM(resp, err)

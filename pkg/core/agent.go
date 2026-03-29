@@ -16,14 +16,15 @@ const defaultMaxTurns = 10
 // Agent ties together a Provider, Memory, tool Registry, and Router
 // to execute agentic loops.
 type Agent struct {
-	provider      llm.Provider
-	memory       *Memory
-	registry     *tool.Registry
-	router       *Router
-	maxTurns     int
-	tracer       *Tracer
-	loopDetector *LoopDetector
-	summarizer   *Summarizer
+	provider       llm.Provider
+	memory        *Memory
+	registry      *tool.Registry
+	router        *Router
+	maxTurns      int
+	tracer        *Tracer
+	loopDetector  *LoopDetector
+	summarizer    *Summarizer
+	streamCallback func(*llm.PartialResponse)
 }
 
 // AgentOption configures an Agent.
@@ -52,6 +53,15 @@ func WithLoopDetector() AgentOption {
 func WithSummarizer() AgentOption {
 	return func(a *Agent) {
 		a.summarizer = NewSummarizer()
+	}
+}
+
+// WithStreamCallback enables streaming of LLM output via the provided callback.
+// The callback is invoked for each partial response event during LLM calls.
+// This is useful for CLI applications that want to display tokens in real-time.
+func WithStreamCallback(cb func(*llm.PartialResponse)) AgentOption {
+	return func(a *Agent) {
+		a.streamCallback = cb
 	}
 }
 

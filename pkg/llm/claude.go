@@ -111,6 +111,127 @@ func (p *ClaudeProvider) Chat(ctx context.Context, chatParams ChatParams) (*Resp
 	return convertResponseFromSDK(msg), nil
 }
 
+func (p *ClaudeProvider) ChatStream(ctx context.Context, params ChatParams, cb func(*PartialResponse)) error {
+	sdkMessages, err := convertMessagesToSDK(params.Messages)
+	if err != nil {
+		return fmt.Errorf("convert messages: %w", err)
+	}
+
+	sdkParams := anthropic.MessageNewParams{
+		Model:     p.model,
+		MaxTokens: p.maxTokens,
+		Messages:  sdkMessages,
+	}
+	if params.System != "" {
+		sdkParams.System = []anthropic.TextBlockParam{{Text: params.System}}
+	}
+	if len(params.Tools) > 0 {
+		sdkParams.Tools = convertToolsToSDK(params.Tools)
+	}
+
+	stream := p.client.Messages.NewStreaming(ctx, sdkParams)
+	defer stream.Close()
+
+	type accumulator struct {
+		index int
+		id    string
+		name  string
+		args  string
+	}
+	var toolCallAcc *accumulator
+
+	for stream.Next() {
+		event := stream.Current()
+
+		switch event.Type {
+		case "content_block_start":
+			// Start of a content block — if it's tool_use, record its index
+			if event.ContentBlock.Type == "tool_use" {
+				toolUseBlock := event.ContentBlock.AsToolUse()
+				toolCallAcc = &accumulator{
+					index: int(event.Index),
+					id:    toolUseBlock.ID,
+					name:  toolUseBlock.Name,
+				}
+			}
+
+		case "content_block_delta":
+			delta := event.Delta
+			switch delta.Type {
+			case "text_delta":
+				if delta.Text != "" {
+					cb(&PartialResponse{
+						Type:      StreamEventTextDelta,
+						TextDelta: delta.Text,
+					})
+				}
+			case "input_json_delta":
+				if delta.PartialJSON != "" && toolCallAcc != nil {
+					toolCallAcc.args += delta.PartialJSON
+					cb(&PartialResponse{
+						Type: StreamEventToolDelta,
+						ToolCallDelta: &ToolCallDelta{
+							Index:           toolCallAcc.index,
+							ArgumentsDelta:   delta.PartialJSON,
+						},
+					})
+				}
+			}
+
+		case "content_block_stop":
+			// Content block finished — if it was a tool call, emit a final delta
+			if toolCallAcc != nil {
+				cb(&PartialResponse{
+					Type: StreamEventToolDelta,
+					ToolCallDelta: &ToolCallDelta{
+						Index:    toolCallAcc.index,
+						ID:       toolCallAcc.id,
+						Name:     toolCallAcc.name,
+					},
+				})
+				toolCallAcc = nil
+			}
+
+		case "message_delta":
+			if event.Usage.OutputTokens > 0 {
+				cb(&PartialResponse{
+					Type:         StreamEventUsage,
+					InputTokens:  int(event.Usage.InputTokens),
+					OutputTokens: int(event.Usage.OutputTokens),
+				})
+			}
+			stopReason := StopReasonEndTurn
+			switch event.Delta.StopReason {
+			case "end_turn":
+				stopReason = StopReasonEndTurn
+			case "tool_use":
+				stopReason = StopReasonToolUse
+			case "max_tokens":
+				stopReason = StopReasonMaxTokens
+			}
+			cb(&PartialResponse{
+				Type:       StreamEventStop,
+				StopReason: stopReason,
+			})
+		}
+	}
+
+	if err := stream.Err(); err != nil {
+		return fmt.Errorf("claude stream: %w", err)
+	}
+
+	cb(nil) // signal stream end
+	return nil
+}
+
+// toolCallAccumulator holds in-progress tool call data during streaming.
+type toolCallAccumulator = struct {
+	index int
+	id    string
+	name  string
+	args  string
+}
+
 // convertMessagesToSDK converts our Message slice to SDK MessageParam slice.
 func convertMessagesToSDK(messages []Message) ([]anthropic.MessageParam, error) {
 	result := make([]anthropic.MessageParam, 0, len(messages))

@@ -141,3 +141,9 @@ func (p *RetryProvider) Name() string { return p.inner.Name() }
 func (p *RetryProvider) EstimateTokens(msgs []llm.Message) int {
 	return p.inner.EstimateTokens(msgs)
 }
+
+// ChatStream delegates to the inner provider's ChatStream.
+// Retry logic does not apply to streaming calls.
+func (p *RetryProvider) ChatStream(ctx context.Context, params llm.ChatParams, cb func(*llm.PartialResponse)) error {
+	return p.inner.ChatStream(ctx, params, cb)
+}

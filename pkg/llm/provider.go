@@ -108,6 +108,11 @@ type Provider interface {
 	// Chat sends a conversation and returns the LLM response.
 	Chat(ctx context.Context, params ChatParams) (*Response, error)
 
+	// ChatStream sends a request and calls cb for each partial response event.
+	// The callback receives nil when the stream ends.
+	// Returns ErrStreamingUnsupported if the provider does not implement streaming.
+	ChatStream(ctx context.Context, params ChatParams, cb func(*PartialResponse)) error
+
 	// Name returns the provider name (for logging/tracing).
 	Name() string
 

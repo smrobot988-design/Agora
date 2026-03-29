@@ -29,6 +29,9 @@ func (m *retryMockProvider) Chat(ctx context.Context, params llm.ChatParams) (*l
 
 func (m *retryMockProvider) Name() string                        { return m.name }
 func (m *retryMockProvider) EstimateTokens(msgs []llm.Message) int { return 0 }
+func (m *retryMockProvider) ChatStream(ctx context.Context, params llm.ChatParams, cb func(*llm.PartialResponse)) error {
+	return llm.ErrStreamingUnsupported
+}
 
 // errNetwork 是网络类错误。
 var errNetwork = errors.New("connection reset by peer")

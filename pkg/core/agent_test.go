@@ -27,6 +27,9 @@ func (m *mockProvider) Chat(ctx context.Context, params llm.ChatParams) (*llm.Re
 
 func (m *mockProvider) Name() string                        { return "mock" }
 func (m *mockProvider) EstimateTokens(msgs []llm.Message) int { return 100 }
+func (m *mockProvider) ChatStream(ctx context.Context, params llm.ChatParams, cb func(*llm.PartialResponse)) error {
+	return llm.ErrStreamingUnsupported
+}
 
 // newTestAgent creates an Agent with mock provider, a simple echo tool, and the given responses.
 func newTestAgent(t *testing.T, responses []*llm.Response, opts ...AgentOption) *Agent {

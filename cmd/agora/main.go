@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	_ "github.com/smrobot988-design/Agora/pkg/config"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/smrobot988-design/Agora/pkg/core"
 	"github.com/smrobot988-design/Agora/pkg/llm"
@@ -39,9 +40,9 @@ func main() {
 	if *flagModel != "" {
 		providerOpts = append(providerOpts, llm.WithModel(anthropic.Model(*flagModel)))
 	}
-	// if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
-	// 	providerOpts = append(providerOpts, llm.WithBaseURL(baseURL))
-	// }
+	if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
+		providerOpts = append(providerOpts, llm.WithBaseURL(baseURL))
+	}
 
 	provider := llm.NewClaudeProvider(providerOpts...)
 

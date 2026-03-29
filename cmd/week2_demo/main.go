@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	_ "github.com/smrobot988-design/Agora/pkg/config"
 	"github.com/smrobot988-design/Agora/pkg/core"
 	agoratrace "github.com/smrobot988-design/Agora/pkg/core/trace"
 	"github.com/smrobot988-design/Agora/pkg/llm"
@@ -118,6 +119,9 @@ type mockProvider struct{ resp *llm.Response }
 
 func (m *mockProvider) Chat(ctx context.Context, params llm.ChatParams) (*llm.Response, error) {
 	return m.resp, nil
+}
+func (m *mockProvider) ChatStream(ctx context.Context, params llm.ChatParams, cb func(*llm.PartialResponse)) error {
+	return llm.ErrStreamingUnsupported
 }
 func (m *mockProvider) Name() string                          { return "mock" }
 func (m *mockProvider) EstimateTokens(msgs []llm.Message) int { return 0 }
