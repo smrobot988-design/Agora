@@ -175,9 +175,9 @@ func TestMiniMaxChatToolUse(t *testing.T) {
 }
 
 func TestMiniMaxChatStream(t *testing.T) {
-	// if os.Getenv("MINIMAX_API_KEY") == "" {
-	// 	t.Skip("MINIMAX_API_KEY not set")
-	// }
+	if os.Getenv("MINIMAX_API_KEY") == "" {
+		t.Skip("MINIMAX_API_KEY not set")
+	}
 	provider := NewMiniMaxProvider()
 
 	var textDelta string

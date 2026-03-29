@@ -1,7 +1,22 @@
+// example 展示了 Agora Agent 的基础用法：无 trace、无 retry、无 loop 检测。
+//
+// 运行方式：
+//
+//	go run ./cmd/example/
+//	go run ./cmd/example/ -provider minimax
+//	go run ./cmd/example/ -provider claude
+//
+// 支持通过环境变量或 -api-key / -base-url 配置：
+//
+//	ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL (for claude)
+//	MINIMAX_API_KEY (for minimax)
+//
+// 或者可以在当前项目加上 .local.env 的配置文件，key=value 的形式去配置
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -14,27 +29,17 @@ import (
 )
 
 func main() {
-	// if os.Getenv("ANTHROPIC_API_KEY") == "" {
-	// 	log.Fatal("ANTHROPIC_API_KEY environment variable is required")
-	// }
+	providerFlag := flag.String("provider", "claude", "Provider: claude or minimax")
+	apiKey := flag.String("api-key", "", "API key")
+	baseURL := flag.String("base-url", "", "Base URL (claude only)")
+	flag.Parse()
 
-	opts := []llm.ClaudeOption{}
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
-		opts = append(opts, llm.WithAPIKey(apiKey))
-	}
-	if baseURL := os.Getenv("ANTHROPIC_BASE_URL"); baseURL != "" {
-		opts = append(opts, llm.WithBaseURL(baseURL))
-	}
-	if len(opts) == 0 {
-		log.Fatal("ANTHROPIC_API_KEY environment variable is required")
-	}
-
-	provider := llm.NewClaudeProvider(opts...)
+	provider := newProvider(*providerFlag, *apiKey, *baseURL)
 	fmt.Printf("Provider: %s\n", provider.Name())
 
-	// Register tools
+	// 注册工具
 	registry := tool.NewRegistry()
-	if err := registry.Register(&tool.Func{
+	mustRegister(registry, &tool.Func{
 		Def: schema.ToolDefinition{
 			Name:        "get_weather",
 			Description: "Get the current weather for a city",
@@ -42,7 +47,7 @@ func main() {
 				Properties: map[string]interface{}{
 					"city": map[string]interface{}{
 						"type":        "string",
-						"description": "The city name",
+						"description": "City name",
 					},
 				},
 				Required: []string{"city"},
@@ -50,31 +55,68 @@ func main() {
 		},
 		Handler: func(ctx context.Context, input map[string]interface{}) (string, error) {
 			city, _ := input["city"].(string)
-			return fmt.Sprintf(`{"city": %q, "temperature": "18°C", "condition": "partly cloudy", "humidity": "72%%"}`, city), nil
+			return fmt.Sprintf(`{"city": %q, "temperature": "18°C", "condition": "partly cloudy"}`, city), nil
 		},
-	}); err != nil {
-		log.Fatalf("Register tool error: %v", err)
-	}
+	})
 
-	// Create Memory with system prompt
+	// 纯净的 Memory（无 trimmer，无特殊配置）
 	mem := core.NewMemory(
 		core.WithSystemPrompt("You are a helpful weather assistant. Answer concisely."),
 	)
 
-	// Create Agent and run
+	// 纯净的 Agent：只有 provider + registry + max turns
 	agent := core.NewAgent(provider, mem, registry, core.WithMaxTurns(5))
 
-	ctx := context.Background()
-	result, err := agent.Run(ctx, "What's the weather in San Francisco?")
+	result, err := agent.Run(context.Background(), "What's the weather in San Francisco?")
 	if err != nil {
 		log.Fatalf("Agent run error: %v", err)
 	}
 
 	fmt.Printf("\nResponse: %s\n", result.Text)
-	fmt.Printf("Tokens: %d in / %d out (total: %d)\n",
-		result.TotalInputTokens, result.TotalOutputTokens, result.TotalTokens())
+	fmt.Printf("Tokens: %d in / %d out\n", result.TotalInputTokens, result.TotalOutputTokens)
 	fmt.Printf("Turns: %d\n", result.Turns)
+}
 
-	n, _ := mem.Len()
-	fmt.Printf("Conversation: %d messages in memory\n", n)
+func mustRegister(r *tool.Registry, t tool.Tool) {
+	if err := r.Register(t); err != nil {
+		log.Fatalf("register tool %q: %v", t.Definition().Name, err)
+	}
+}
+
+// newProvider creates a Provider based on command-line flags and env vars.
+func newProvider(providerFlag, apiKey, baseURL string) llm.Provider {
+	switch providerFlag {
+	case "minimax":
+		opts := []llm.MiniMaxOption{}
+		key := apiKey
+		if key == "" {
+			key = os.Getenv("MINIMAX_API_KEY")
+		}
+		if key != "" {
+			opts = append(opts, llm.MiniMaxWithAPIKey(key))
+		}
+		return llm.NewMiniMaxProvider(opts...)
+
+	case "claude":
+		opts := []llm.ClaudeOption{}
+		key := apiKey
+		if key == "" {
+			key = os.Getenv("ANTHROPIC_API_KEY")
+		}
+		if key != "" {
+			opts = append(opts, llm.WithAPIKey(key))
+		}
+		url := baseURL
+		if url == "" {
+			url = os.Getenv("ANTHROPIC_BASE_URL")
+		}
+		if url != "" {
+			opts = append(opts, llm.WithBaseURL(url))
+		}
+		return llm.NewClaudeProvider(opts...)
+
+	default:
+		log.Fatalf("unknown provider %q (use claude or minimax)", providerFlag)
+		return nil
+	}
 }

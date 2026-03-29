@@ -45,17 +45,32 @@ func Load() error {
 	return nil
 }
 
-// localEnvPath returns the path to the local env file, checking ~ first then CWD.
+// localEnvPath returns the path to the local env file.
+// It searches in order: ~/.agora/local.env, then walks up from CWD to find .local.env.
 func localEnvPath() string {
 	home, _ := os.UserHomeDir()
-	paths := []string{
-		filepath.Join(home, ".agora", "local.env"),
-		".local.env",
+	// Check ~/.agora/local.env first.
+	homePath := filepath.Join(home, ".agora", "local.env")
+	if _, err := os.Stat(homePath); err == nil {
+		return homePath
 	}
-	for _, p := range paths {
+
+	// Walk up from current working directory to find .local.env.
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		p := filepath.Join(cwd, ".local.env")
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
+		parent := filepath.Dir(cwd)
+		if parent == cwd {
+			// Reached filesystem root.
+			break
+		}
+		cwd = parent
 	}
 	return ""
 }

@@ -28,9 +28,8 @@ go.work.sum
 .env
 .local.env
 
-# Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
 .claude/
 Agora_Framework_Plan.md
 CLAUDE.md

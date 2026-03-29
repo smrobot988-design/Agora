@@ -58,7 +58,7 @@ func MiniMaxWithBaseURL(url string) MiniMaxOption {
 // By default reads MINIMAX_API_KEY from environment.
 func NewMiniMaxProvider(opts ...MiniMaxOption) *MiniMaxProvider {
 	p := &MiniMaxProvider{
-		model:     "MiniMax-M2.5",
+		model:     "MiniMax-M2.7",
 		maxTokens: 4096,
 	}
 	for _, opt := range opts {
@@ -308,7 +308,7 @@ func convertToolsToGoOpenAI(tools []schema.ToolDefinition) []openai.Tool {
 	result := make([]openai.Tool, len(tools))
 	for i, t := range tools {
 		result[i] = openai.Tool{
-			Type:     openai.ToolTypeFunction,
+			Type: openai.ToolTypeFunction,
 			Function: &openai.FunctionDefinition{
 				Name:        t.Name,
 				Description: t.Description,

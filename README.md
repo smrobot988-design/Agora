@@ -24,20 +24,34 @@ go get github.com/smrobot988-design/Agora
 
 ### 运行 Demo
 
+所有入口支持通过命令行 flag、环境变量或 `.local.env` 配置 API key：
+
 ```bash
-# 编译
-go build ./...
+# 基础用法（纯净 Agent，无 trace/retry/loop）
+go run ./cmd/example/                          # 默认 claude
+go run ./cmd/example/ -provider minimax
 
-# 单元测试
-go test ./...
+# Week 2 全特性（Retry + Loop + Trace + Summary）
+go run ./cmd/with-trace/
+go run ./cmd/with-trace/ -provider minimax
 
-# 交互式 CLI（支持 Claude 和 MiniMax）
-export ANTHROPIC_API_KEY=your_key_here
-go run ./cmd/agora/
-
-# 流式 REPL（支持 tool use）
-export MINIMAX_API_KEY=your_key_here
+# 流式 REPL（边生成边打印）
 go run ./cmd/stream/ -provider minimax
+go run ./cmd/stream/ -provider claude
+
+# 支持以下配置方式（优先级：flag > env > .local.env）：
+
+# 方式 1：环境变量
+export ANTHROPIC_API_KEY=your_key
+export ANTHROPIC_BASE_URL=https://api.ccodezh.com  # claude 第三方代理
+export MINIMAX_API_KEY=your_key
+
+# 方式 2：.local.env 文件（不会被 git 提交）
+echo "ANTHROPIC_API_KEY=sk-xxx" > .local.env
+echo "MINIMAX_API_KEY=sk-xxx" >> .local.env
+
+# 方式 3：命令行 flag
+go run ./cmd/example/ -api-key=sk-xxx -base-url=https://api.ccodezh.com
 ```
 
 ### 5 分钟上手
@@ -51,16 +65,16 @@ provider := llm.NewClaudeProvider(
 
 // 2. 注册工具
 registry := tool.NewRegistry()
-registry.MustRegister(builtin.NewReadFile())
-registry.MustRegister(builtin.NewRunCommand())
+registry.Register(builtin.NewReadFile())
+registry.Register(builtin.NewRunCommand())
 
-// 3. 创建 Agent
-agent := core.NewAgent(provider,
-    core.WithRegistry(registry),
-    core.WithMaxTurns(20),
-)
+// 3. 创建 Memory
+mem := core.NewMemory(core.WithSystemPrompt("You are a helpful assistant."))
 
-// 4. 运行
+// 4. 创建 Agent
+agent := core.NewAgent(provider, mem, registry, core.WithMaxTurns(20))
+
+// 5. 运行
 result, err := agent.Run(context.Background(), "帮我读取 go.mod 文件")
 if err != nil {
     log.Fatal(err)
