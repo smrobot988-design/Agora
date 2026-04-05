@@ -17,14 +17,15 @@ const defaultMaxTurns = 10
 // to execute agentic loops.
 type Agent struct {
 	provider       llm.Provider
-	memory        *Memory
-	registry      *tool.Registry
-	router        *Router
-	maxTurns      int
-	tracer        *Tracer
-	loopDetector  *LoopDetector
-	summarizer    *Summarizer
+	memory         *Memory
+	registry       *tool.Registry
+	router         *Router
+	maxTurns       int
+	tracer         *Tracer
+	loopDetector   *LoopDetector
+	summarizer     *Summarizer
 	streamCallback func(*llm.PartialResponse)
+	lastToolResults []llm.ToolResult
 }
 
 // AgentOption configures an Agent.
@@ -90,8 +91,12 @@ func (a *Agent) Run(ctx context.Context, input string) (*Result, error) {
 
 	result := &Result{}
 	summary := &RunSummary{StartTime: time.Now()}
+	a.lastToolResults = nil
 
 	finalResult, runErr := a.runLoop(ctx, result, summary)
+
+	// Capture the last tool results from memory for orchestration access.
+	a.lastToolResults, _ = a.memory.LastToolResults()
 
 	if a.tracer != nil {
 		a.tracer.FinalizeSnapshot(finalResult)
@@ -107,4 +112,11 @@ func (a *Agent) Run(ctx context.Context, input string) (*Result, error) {
 	}
 
 	return finalResult, runErr
+}
+
+// LastToolResults returns the tool results from the most recent Agent.Run call.
+// Used by orchestrator patterns (e.g., Swarm handoff detection) to inspect
+// what tools were called without relying on LLM text parsing.
+func (a *Agent) LastToolResults() ([]llm.ToolResult, error) {
+	return a.lastToolResults, nil
 }

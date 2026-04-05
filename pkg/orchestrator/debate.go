@@ -159,7 +159,7 @@ func (s *DebateStrategizer) Orchestrate(ctx context.Context, input string, runne
 		"results_to_merge", len(finalRoundResults),
 	)
 
-	merged, err := s.merger.Merge(finalRoundResults)
+	merged, err := s.merger.Merge(ctx, finalRoundResults)
 	if err != nil {
 		return nil, fmt.Errorf("debate merge: %w", err)
 	}

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,16 +13,18 @@ import (
 )
 
 // handoffPrefix is the structured signal prefix that HandoffTool returns.
-// The SwarmRunner parses result text for this prefix to detect handoffs.
-const handoffPrefix = "HANDOFF:"
+const (
+	handoffPrefix          = "HANDOFF:"
+	defaultMaxHandoffCount = 10
+)
 
 // SwarmRunner implements the Handoff/Swarm pattern.
 // Agents can transfer control to other agents by calling a HandoffTool.
 // Unlike Supervisor (where control returns to the coordinator), in Swarm
 // the original agent exits and the target agent fully takes over.
 //
-// SwarmRunner implements Runner (not Strategizer) because it manages
-// its own runner selection loop rather than being driven by Orchestrator.
+// Handoff detection reads tool results directly from the Runner
+// (via RunnerWithToolResults), which is more reliable than parsing LLM text.
 type SwarmRunner struct {
 	name        string
 	runners     map[string]Runner
@@ -38,20 +41,12 @@ func WithMaxHandoffs(n int) SwarmOption {
 }
 
 // NewSwarmRunner creates a swarm with named runners.
-//
-//   - name: identifier for this swarm.
-//   - entryPoint: name of the initial runner to execute.
-//   - runners: map of runner name → Runner instance.
-//   - opts: optional configuration.
-//
-// Each runner's Agent should have a HandoffTool registered in its tool registry
-// so the LLM can signal handoffs.
 func NewSwarmRunner(name, entryPoint string, runners map[string]Runner, opts ...SwarmOption) *SwarmRunner {
 	s := &SwarmRunner{
 		name:        name,
 		runners:     runners,
 		entryPoint:  entryPoint,
-		maxHandoffs: 10,
+		maxHandoffs: defaultMaxHandoffCount,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -60,8 +55,8 @@ func NewSwarmRunner(name, entryPoint string, runners map[string]Runner, opts ...
 }
 
 // Run executes the swarm starting from the entry point.
-// On each iteration, if the current agent's result contains a handoff signal,
-// control transfers to the target agent. Otherwise, the result is returned.
+// Handoff signals are detected by reading tool results from the runner,
+// not by parsing LLM text output.
 func (s *SwarmRunner) Run(ctx context.Context, input string) (*core.Result, error) {
 	current := s.entryPoint
 	currentInput := input
@@ -94,55 +89,89 @@ func (s *SwarmRunner) Run(ctx context.Context, input string) (*core.Result, erro
 		aggregated.TotalOutputTokens += result.TotalOutputTokens
 		aggregated.Turns += result.Turns
 
-		// Check for handoff signal.
-		target, message, isHandoff := parseHandoff(result.Text)
-		if !isHandoff {
-			// Terminal result — no handoff, return.
+		// Try to detect handoff from tool results (via RunnerWithToolResults).
+		target, message := s.detectHandoff(runner)
+		if target != "" {
+			// Handoff detected from tool results — LLM text is ignored.
 			aggregated.Text = result.Text
-			slog.Info("swarm completed",
-				"swarm", s.name,
-				"final_agent", current,
-				"total_handoffs", handoff,
+			slog.Info("swarm handoff",
+				"from", current,
+				"to", target,
+				"via", "tool_result",
 			)
-			return aggregated, nil
+			current = target
+			currentInput = message
+			continue
 		}
 
-		slog.Info("swarm handoff",
-			"from", current,
-			"to", target,
+		// No handoff in tool results — terminal result.
+		aggregated.Text = result.Text
+		slog.Info("swarm completed",
+			"swarm", s.name,
+			"final_agent", current,
+			"total_handoffs", handoff,
 		)
-
-		current = target
-		currentInput = message
+		return aggregated, nil
 	}
 
 	return nil, fmt.Errorf("swarm %s: max handoffs (%d) exceeded", s.name, s.maxHandoffs)
 }
 
+// detectHandoff checks if the runner's last tool results contain a handoff signal.
+// Returns (target, context) if found, ("", "") if not.
+func (s *SwarmRunner) detectHandoff(runner Runner) (target, context string) {
+	rwt, ok := runner.(RunnerWithToolResults)
+	if !ok {
+		return "", ""
+	}
+
+	results, err := rwt.LastToolResults()
+	if err != nil || len(results) == 0 {
+		return "", ""
+	}
+
+	// Check each tool result for the handoff prefix.
+	for _, tr := range results {
+		if strings.HasPrefix(tr.Content, handoffPrefix) {
+			return parseHandoffFromContent(tr.Content)
+		}
+		// Also try parsing as JSON.
+		if t, c := parseHandoffFromJSON(tr.Content); t != "" {
+			return t, c
+		}
+	}
+	return "", ""
+}
+
 // Name returns the swarm's name.
 func (s *SwarmRunner) Name() string { return s.name }
 
-// parseHandoff checks if the text starts with the handoff prefix
-// and extracts the target agent name and context message.
-// Format: "HANDOFF:<target>:<message>"
-func parseHandoff(text string) (target, message string, isHandoff bool) {
-	if !strings.HasPrefix(text, handoffPrefix) {
-		return "", "", false
-	}
-
-	rest := text[len(handoffPrefix):]
+// parseHandoffFromContent extracts target and context from a HANDOFF: prefixed string.
+func parseHandoffFromContent(content string) (target, context string) {
+	rest := content[len(handoffPrefix):]
 	idx := strings.Index(rest, ":")
 	if idx < 0 {
-		// "HANDOFF:target" with no message.
-		return rest, "", true
+		return rest, ""
 	}
+	return rest[:idx], rest[idx+1:]
+}
 
-	return rest[:idx], rest[idx+1:], true
+// handoffJSON is the JSON handoff signal format.
+type handoffJSON struct {
+	Target  string `json:"target"`
+	Context string `json:"context"`
+}
+
+// parseHandoffFromJSON extracts target and context from a JSON handoff signal.
+func parseHandoffFromJSON(content string) (target, context string) {
+	var h handoffJSON
+	if err := json.Unmarshal([]byte(content), &h); err == nil && h.Target != "" {
+		return h.Target, h.Context
+	}
+	return "", ""
 }
 
 // HandoffTool is a tool that agents in a swarm call to signal a handoff.
-// When executed, it returns a structured string that SwarmRunner parses
-// to determine the next agent to run.
 type HandoffTool struct {
 	availableAgents []string
 }
@@ -177,13 +206,17 @@ func (t *HandoffTool) Definition() schema.ToolDefinition {
 	}
 }
 
-// Execute returns a structured handoff signal that SwarmRunner parses.
+// Execute returns a structured handoff signal that SwarmRunner parses
+// from tool results (supports both HANDOFF: prefix and JSON formats).
 func (t *HandoffTool) Execute(_ context.Context, input map[string]interface{}) (string, error) {
 	target, _ := input["target_agent"].(string)
 	if target == "" {
 		return "", fmt.Errorf("handoff: target_agent is required")
 	}
 
-	message, _ := input["context"].(string)
-	return fmt.Sprintf("%s%s:%s", handoffPrefix, target, message), nil
+	context, _ := input["context"].(string)
+
+	// Prefer HANDOFF: prefix format for simple parsing.
+	return fmt.Sprintf("%s%s:%s", handoffPrefix, target, context), nil
 }
+

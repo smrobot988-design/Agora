@@ -164,3 +164,37 @@ func (m *Memory) appendMsg(msg llm.Message) error {
 	defer m.mu.Unlock()
 	return m.store.Append(msg)
 }
+
+// LastToolResults returns the tool results from the most recent assistant turn,
+// by scanning stored messages from the end backward.
+func (m *Memory) LastToolResults() ([]llm.ToolResult, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	msgs, err := m.store.Messages()
+	if err != nil {
+		return nil, fmt.Errorf("store messages: %w", err)
+	}
+
+	// Scan from the last message backward to find the most recent tool-result message.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		msg := msgs[i]
+		if msg.Role != llm.RoleTool {
+			continue
+		}
+		var results []llm.ToolResult
+		for _, block := range msg.Content {
+			if block.Type == llm.BlockToolResult {
+				results = append(results, llm.ToolResult{
+					ToolCallID: block.ToolResult.ToolCallID,
+					Content:   block.ToolResult.Content,
+					IsError:   block.ToolResult.IsError,
+				})
+			}
+		}
+		if len(results) > 0 {
+			return results, nil
+		}
+	}
+	return nil, nil
+}

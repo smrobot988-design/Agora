@@ -10,8 +10,10 @@ import (
 
 // Merger combines multiple Results into one.
 // Used by Parallel, Debate, and other patterns that produce multiple outputs.
+// Context is always propagated through Merge to support cancellation and deadlines
+// across the full orchestration chain.
 type Merger interface {
-	Merge(results []*core.Result) (*core.Result, error)
+	Merge(ctx context.Context, results []*core.Result) (*core.Result, error)
 }
 
 // ConcatMerger concatenates all result texts with a separator
@@ -21,7 +23,7 @@ type ConcatMerger struct {
 }
 
 // Merge concatenates texts and aggregates token usage.
-func (m *ConcatMerger) Merge(results []*core.Result) (*core.Result, error) {
+func (m *ConcatMerger) Merge(_ context.Context, results []*core.Result) (*core.Result, error) {
 	if len(results) == 0 {
 		return &core.Result{}, nil
 	}
@@ -56,7 +58,7 @@ func (m *ConcatMerger) Merge(results []*core.Result) (*core.Result, error) {
 type FirstSuccessMerger struct{}
 
 // Merge returns the first non-nil result.
-func (m *FirstSuccessMerger) Merge(results []*core.Result) (*core.Result, error) {
+func (m *FirstSuccessMerger) Merge(_ context.Context, results []*core.Result) (*core.Result, error) {
 	for _, r := range results {
 		if r != nil {
 			return r, nil
@@ -79,7 +81,8 @@ type LLMMerger struct {
 }
 
 // Merge invokes the Runner with a synthesized prompt containing all results.
-func (m *LLMMerger) Merge(results []*core.Result) (*core.Result, error) {
+// Context is propagated to allow cancellation of the synthesis step.
+func (m *LLMMerger) Merge(ctx context.Context, results []*core.Result) (*core.Result, error) {
 	if len(results) == 0 {
 		return &core.Result{}, nil
 	}
@@ -102,7 +105,7 @@ func (m *LLMMerger) Merge(results []*core.Result) (*core.Result, error) {
 	combined := strings.Join(parts, "\n\n---\n\n")
 	prompt := fmt.Sprintf(m.PromptTemplate, len(parts), combined)
 
-	synthResult, err := m.Runner.Run(context.Background(), prompt)
+	synthResult, err := m.Runner.Run(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("LLM merger synthesis: %w", err)
 	}

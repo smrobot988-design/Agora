@@ -516,7 +516,7 @@ type conciseMerger struct {
 	runner orchestrator.Runner
 }
 
-func (m *conciseMerger) Merge(results []*core.Result) (*core.Result, error) {
+func (m *conciseMerger) Merge(ctx context.Context, results []*core.Result) (*core.Result, error) {
 	if len(results) == 0 {
 		return &core.Result{}, nil
 	}

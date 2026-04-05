@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/smrobot988-design/Agora/pkg/core"
+	"github.com/smrobot988-design/Agora/pkg/llm"
 	"github.com/smrobot988-design/Agora/pkg/tool"
 )
 
@@ -17,35 +18,32 @@ func TestHandoffToolImplementsTool(t *testing.T) {
 	var _ tool.Tool = (*HandoffTool)(nil)
 }
 
-func TestParseHandoff(t *testing.T) {
+func TestParseHandoffFromContent(t *testing.T) {
 	tests := []struct {
-		input     string
-		target    string
-		message   string
-		isHandoff bool
+		input   string
+		target  string
+		context string
 	}{
-		{"HANDOFF:tech:please help", "tech", "please help", true},
-		{"HANDOFF:billing:", "billing", "", true},
-		{"HANDOFF:billing", "billing", "", true},
-		{"normal response", "", "", false},
-		{"", "", "", false},
-		{"HANDOFF:", "", "", true},
+		{"HANDOFF:tech:please help", "tech", "please help"},
+		{"HANDOFF:billing:", "billing", ""},
+		{"HANDOFF:billing", "billing", ""},
 	}
 
 	for _, tt := range tests {
-		target, message, isHandoff := parseHandoff(tt.input)
-		if target != tt.target || message != tt.message || isHandoff != tt.isHandoff {
-			t.Errorf("parseHandoff(%q) = (%q, %q, %v), want (%q, %q, %v)",
-				tt.input, target, message, isHandoff, tt.target, tt.message, tt.isHandoff)
+		target, ctx := parseHandoffFromContent(tt.input)
+		if target != tt.target || ctx != tt.context {
+			t.Errorf("parseHandoffFromContent(%q) = (%q, %q), want (%q, %q)",
+				tt.input, target, ctx, tt.target, tt.context)
 		}
 	}
 }
 
 func TestSwarmRunnerNoHandoff(t *testing.T) {
-	// Agent returns a normal response (no handoff).
-	agent := &mockRunner{
-		name:   "front_desk",
-		result: &core.Result{Text: "I can help you with that!", TotalInputTokens: 10, TotalOutputTokens: 5},
+	// Agent returns a normal response with no handoff in tool results.
+	agent := &toolResultsMockRunner{
+		name:     "front_desk",
+		result:   &core.Result{Text: "I can help you with that!", TotalInputTokens: 10, TotalOutputTokens: 5},
+		toolResults: nil, // no handoff
 	}
 
 	swarm := NewSwarmRunner("test-swarm", "front_desk", map[string]Runner{
@@ -62,14 +60,18 @@ func TestSwarmRunnerNoHandoff(t *testing.T) {
 }
 
 func TestSwarmRunnerSingleHandoff(t *testing.T) {
-	// front_desk hands off to tech_support, which returns a final answer.
-	frontDesk := &mockRunner{
+	// front_desk has a handoff tool result; tech_support returns final answer.
+	frontDesk := &toolResultsMockRunner{
 		name:   "front_desk",
-		result: &core.Result{Text: "HANDOFF:tech_support:user has a bug", TotalInputTokens: 10, TotalOutputTokens: 5},
+		result: &core.Result{Text: "Let me transfer you...", TotalInputTokens: 10, TotalOutputTokens: 5},
+		toolResults: []llm.ToolResult{
+			{ToolCallID: "1", Content: "HANDOFF:tech_support:user has a bug"},
+		},
 	}
-	techSupport := &mockRunner{
-		name:   "tech_support",
-		result: &core.Result{Text: "Bug fixed!", TotalInputTokens: 20, TotalOutputTokens: 10},
+	techSupport := &toolResultsMockRunner{
+		name:        "tech_support",
+		result:      &core.Result{Text: "Bug fixed!", TotalInputTokens: 20, TotalOutputTokens: 10},
+		toolResults: nil,
 	}
 
 	swarm := NewSwarmRunner("test-swarm", "front_desk", map[string]Runner{
@@ -95,17 +97,24 @@ func TestSwarmRunnerSingleHandoff(t *testing.T) {
 }
 
 func TestSwarmRunnerChainedHandoffs(t *testing.T) {
-	a := &mockRunner{
+	a := &toolResultsMockRunner{
 		name:   "a",
-		result: &core.Result{Text: "HANDOFF:b:from a"},
+		result: &core.Result{Text: "transferring..."},
+		toolResults: []llm.ToolResult{
+			{ToolCallID: "1", Content: "HANDOFF:b:from a"},
+		},
 	}
-	b := &mockRunner{
+	b := &toolResultsMockRunner{
 		name:   "b",
-		result: &core.Result{Text: "HANDOFF:c:from b"},
+		result: &core.Result{Text: "transferring..."},
+		toolResults: []llm.ToolResult{
+			{ToolCallID: "2", Content: "HANDOFF:c:from b"},
+		},
 	}
-	c := &mockRunner{
-		name:   "c",
-		result: &core.Result{Text: "final"},
+	c := &toolResultsMockRunner{
+		name:        "c",
+		result:      &core.Result{Text: "final"},
+		toolResults: nil,
 	}
 
 	swarm := NewSwarmRunner("chain", "a", map[string]Runner{
@@ -123,13 +132,19 @@ func TestSwarmRunnerChainedHandoffs(t *testing.T) {
 
 func TestSwarmRunnerMaxHandoffs(t *testing.T) {
 	// Create an infinite loop of handoffs.
-	a := &mockRunner{
+	a := &toolResultsMockRunner{
 		name:   "a",
-		result: &core.Result{Text: "HANDOFF:b:loop"},
+		result: &core.Result{Text: "loop"},
+		toolResults: []llm.ToolResult{
+			{ToolCallID: "1", Content: "HANDOFF:b:loop"},
+		},
 	}
-	b := &mockRunner{
+	b := &toolResultsMockRunner{
 		name:   "b",
-		result: &core.Result{Text: "HANDOFF:a:loop"},
+		result: &core.Result{Text: "loop"},
+		toolResults: []llm.ToolResult{
+			{ToolCallID: "2", Content: "HANDOFF:a:loop"},
+		},
 	}
 
 	swarm := NewSwarmRunner("loop", "a", map[string]Runner{
@@ -143,9 +158,12 @@ func TestSwarmRunnerMaxHandoffs(t *testing.T) {
 }
 
 func TestSwarmRunnerUnknownAgent(t *testing.T) {
-	a := &mockRunner{
+	a := &toolResultsMockRunner{
 		name:   "a",
-		result: &core.Result{Text: "HANDOFF:nonexistent:help"},
+		result: &core.Result{Text: "..."},
+		toolResults: []llm.ToolResult{
+			{ToolCallID: "1", Content: "HANDOFF:nonexistent:help"},
+		},
 	}
 
 	swarm := NewSwarmRunner("test", "a", map[string]Runner{"a": a})
@@ -194,7 +212,10 @@ func TestSwarmRunnerCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	a := newMockRunner("a", "never")
+	a := &toolResultsMockRunner{
+		name:   "a",
+		result: &core.Result{Text: "never"},
+	}
 	swarm := NewSwarmRunner("test", "a", map[string]Runner{"a": a})
 
 	_, err := swarm.Run(ctx, "input")
@@ -211,4 +232,23 @@ func TestSwarmRunnerAgentError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from agent")
 	}
+}
+
+// toolResultsMockRunner is a mock that implements RunnerWithToolResults.
+type toolResultsMockRunner struct {
+	name        string
+	result      *core.Result
+	toolResults []llm.ToolResult
+	calls      []string // records inputs passed to Run
+}
+
+func (m *toolResultsMockRunner) Run(ctx context.Context, input string) (*core.Result, error) {
+	m.calls = append(m.calls, input)
+	return m.result, nil
+}
+
+func (m *toolResultsMockRunner) Name() string { return m.name }
+
+func (m *toolResultsMockRunner) LastToolResults() ([]llm.ToolResult, error) {
+	return m.toolResults, nil
 }

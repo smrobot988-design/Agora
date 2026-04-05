@@ -70,5 +70,5 @@ func (s *ParallelStrategizer) Orchestrate(ctx context.Context, input string, run
 		return nil, err
 	}
 
-	return s.merger.Merge(results)
+	return s.merger.Merge(ctx, results)
 }

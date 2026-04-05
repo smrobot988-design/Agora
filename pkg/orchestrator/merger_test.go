@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"testing"
 
 	"github.com/smrobot988-design/Agora/pkg/core"
@@ -8,7 +9,7 @@ import (
 
 func TestConcatMergerEmpty(t *testing.T) {
 	m := &ConcatMerger{Separator: "\n---\n"}
-	result, err := m.Merge(nil)
+	result, err := m.Merge(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -25,7 +26,7 @@ func TestConcatMerger(t *testing.T) {
 		{Text: "gamma", TotalInputTokens: 15, TotalOutputTokens: 8, Turns: 2},
 	}
 
-	merged, err := m.Merge(results)
+	merged, err := m.Merge(context.Background(), results)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestConcatMergerSkipsNil(t *testing.T) {
 		nil,
 		{Text: "b"},
 	}
-	merged, err := m.Merge(results)
+	merged, err := m.Merge(context.Background(), results)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestFirstSuccessMerger(t *testing.T) {
 		{Text: "winner"},
 		{Text: "loser"},
 	}
-	merged, err := m.Merge(results)
+	merged, err := m.Merge(context.Background(), results)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestFirstSuccessMerger(t *testing.T) {
 
 func TestFirstSuccessMergerAllNil(t *testing.T) {
 	m := &FirstSuccessMerger{}
-	_, err := m.Merge([]*core.Result{nil, nil})
+	_, err := m.Merge(context.Background(), []*core.Result{nil, nil})
 	if err == nil {
 		t.Error("expected error for all-nil results")
 	}
