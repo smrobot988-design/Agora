@@ -102,42 +102,96 @@ func mustRegister(r *tool.Registry, t tool.Tool) {
 }
 
 func newProvider() llm.Provider {
-	providerFlag := flag.String("provider", "claude", "claude or minimax")
+	providerFlag := flag.String("provider", "claude", "Provider: claude, minimax, deepseek, doubao, kimi, glm, gpt")
 	apiKey := flag.String("api-key", "", "API key")
 	baseURL := flag.String("base-url", "", "Base URL")
 	flag.Parse()
+
 	switch *providerFlag {
 	case "minimax":
 		opts := []llm.MiniMaxOption{}
-		key := *apiKey
-		if key == "" {
-			key = os.Getenv("MINIMAX_API_KEY")
+		if key := firstNonEmpty(*apiKey, os.Getenv("MINIMAX_API_KEY")); key != "" {
+			opts = append(opts, llm.MiniMaxWithAPIKey(key))
 		}
-		if *apiKey != "" {
-			opts = append(opts, llm.MiniMaxWithAPIKey(*apiKey))
+		if *baseURL != "" {
+			opts = append(opts, llm.MiniMaxWithBaseURL(*baseURL))
 		}
 		return llm.NewMiniMaxProvider(opts...)
 
 	case "claude":
 		opts := []llm.ClaudeOption{}
-		key := *apiKey
-		if key == "" {
-			key = os.Getenv("ANTHROPIC_API_KEY")
-		}
-		if key != "" {
+		if key := firstNonEmpty(*apiKey, os.Getenv("ANTHROPIC_API_KEY")); key != "" {
 			opts = append(opts, llm.WithAPIKey(key))
 		}
-		url := *baseURL
-		if url == "" {
-			url = os.Getenv("ANTHROPIC_BASE_URL")
-		}
-		if url != "" {
+		if url := firstNonEmpty(*baseURL, os.Getenv("ANTHROPIC_BASE_URL")); url != "" {
 			opts = append(opts, llm.WithBaseURL(url))
 		}
 		return llm.NewClaudeProvider(opts...)
 
+	case "deepseek":
+		opts := []llm.DeepseekOption{}
+		if key := firstNonEmpty(*apiKey, os.Getenv("DEEPSEEK_API_KEY")); key != "" {
+			opts = append(opts, llm.DeepseekWithAPIKey(key))
+		}
+		if *baseURL != "" {
+			opts = append(opts, llm.DeepseekWithBaseURL(*baseURL))
+		}
+		return llm.NewDeepseekProvider(opts...)
+
+	case "doubao":
+		opts := []llm.DoubaoOption{}
+		if key := firstNonEmpty(*apiKey, os.Getenv("ARK_API_KEY")); key != "" {
+			opts = append(opts, llm.DoubaoWithAPIKey(key))
+		}
+		if model := os.Getenv("ARK_MODEL"); model != "" {
+			opts = append(opts, llm.DoubaoWithModel(model))
+		}
+		if *baseURL != "" {
+			opts = append(opts, llm.DoubaoWithBaseURL(*baseURL))
+		}
+		return llm.NewDoubaoProvider(opts...)
+
+	case "kimi":
+		opts := []llm.KimiOption{}
+		if key := firstNonEmpty(*apiKey, os.Getenv("MOONSHOT_API_KEY")); key != "" {
+			opts = append(opts, llm.KimiWithAPIKey(key))
+		}
+		if *baseURL != "" {
+			opts = append(opts, llm.KimiWithBaseURL(*baseURL))
+		}
+		return llm.NewKimiProvider(opts...)
+
+	case "glm":
+		opts := []llm.GLMOption{}
+		if key := firstNonEmpty(*apiKey, os.Getenv("GLM_API_KEY")); key != "" {
+			opts = append(opts, llm.GLMWithAPIKey(key))
+		}
+		if *baseURL != "" {
+			opts = append(opts, llm.GLMWithBaseURL(*baseURL))
+		}
+		return llm.NewGLMProvider(opts...)
+
+	case "gpt":
+		opts := []llm.GPTOption{}
+		if key := firstNonEmpty(*apiKey, os.Getenv("OPENAI_API_KEY")); key != "" {
+			opts = append(opts, llm.GPTWithAPIKey(key))
+		}
+		if *baseURL != "" {
+			opts = append(opts, llm.GPTWithBaseURL(*baseURL))
+		}
+		return llm.NewGPTProvider(opts...)
+
 	default:
-		log.Fatalf("unknown provider %q", *providerFlag)
+		log.Fatalf("unknown provider %q (use claude, minimax, deepseek, doubao, kimi, glm, gpt)", *providerFlag)
 		return nil
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

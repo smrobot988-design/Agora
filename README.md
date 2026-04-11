@@ -8,7 +8,7 @@ Agora 是一个轻量级的 Go Agent 运行时引擎，抽象了 LLM Provider、
 
 ## 核心特性
 
-- **多 Provider 支持** — 接入 Claude（Anthropic SDK）、MiniMax（OpenAI 兼容 API），通过 `Provider` 接口可扩展，正在支持更多的模型接入
+- **多 Provider 支持** — 接入 Claude（Anthropic SDK）、MiniMax、Deepseek、Doubao（豆包）、Kimi、GLM（智谱）、GPT（OpenAI），通过 `Provider` 接口可扩展
 - **流式输出** — 支持 Server-Sent Events 流式渲染，边生成边打印
 - **内置工具** — `read_file`（文件读取）、`run_command`（shell 执行）
 - **可观测性** — 内置了 RetryProvider（指数退避）、LoopDetector（循环检测）、Tracer（分布式追踪）、Summarizer（运行摘要）
@@ -30,10 +30,15 @@ go get github.com/smrobot988-design/Agora
 # 基础用法（纯净 Agent，无 trace/retry/loop）
 go run ./cmd/example/                          # 默认 claude
 go run ./cmd/example/ -provider minimax
+go run ./cmd/example/ -provider deepseek
+go run ./cmd/example/ -provider doubao
+go run ./cmd/example/ -provider kimi
+go run ./cmd/example/ -provider glm
+go run ./cmd/example/ -provider gpt
 
-# Week 2 全特性（Retry + Loop + Trace + Summary）
+# 全特性（Retry + Loop + Trace + Summary）
 go run ./cmd/with-trace/
-go run ./cmd/with-trace/ -provider minimax
+go run ./cmd/with-trace/ -provider deepseek
 
 # 流式 REPL（边生成边打印）
 go run ./cmd/stream/ -provider minimax
@@ -42,26 +47,38 @@ go run ./cmd/stream/ -provider claude
 # 支持以下配置方式（优先级：flag > env > .local.env）：
 
 # 方式 1：环境变量
-export ANTHROPIC_API_KEY=your_key
-export ANTHROPIC_BASE_URL=https://api.ccodezh.com  # claude 第三方代理
-export MINIMAX_API_KEY=your_key
+export ANTHROPIC_API_KEY=your_key           # Claude
+export ANTHROPIC_BASE_URL=https://proxy.example.com  # Claude 第三方代理
+export MINIMAX_API_KEY=your_key             # MiniMax
+export DEEPSEEK_API_KEY=your_key            # Deepseek
+export ARK_API_KEY=your_key                 # Doubao (豆包/火山引擎)
+export ARK_MODEL=ep-20240901xxxxx           # Doubao endpoint ID
+export MOONSHOT_API_KEY=your_key            # Kimi (Moonshot AI)
+export GLM_API_KEY=your_key                 # GLM (智谱 AI)
+export OPENAI_API_KEY=your_key              # GPT (OpenAI)
 
 # 方式 2：.local.env 文件（不会被 git 提交）
 echo "ANTHROPIC_API_KEY=sk-xxx" > .local.env
-echo "MINIMAX_API_KEY=sk-xxx" >> .local.env
+echo "DEEPSEEK_API_KEY=sk-xxx" >> .local.env
 
 # 方式 3：命令行 flag
-go run ./cmd/example/ -api-key=sk-xxx -base-url=https://api.ccodezh.com
+go run ./cmd/example/ -api-key=sk-xxx -base-url=https://proxy.example.com
 ```
 
 ### 5 分钟上手
 
 ```go
-// 1. 创建 Provider（支持 Claude / MiniMax）
+// 1. 创建 Provider（支持 Claude / MiniMax / Deepseek / Doubao / Kimi / GLM / GPT）
 provider := llm.NewClaudeProvider(
     llm.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")),
     llm.WithModel(anthropic.ModelClaudeSonnet4_6),
 )
+// 或使用其他 Provider：
+// provider := llm.NewDeepseekProvider(llm.DeepseekWithAPIKey("sk-xxx"))
+// provider := llm.NewDoubaoProvider(llm.DoubaoWithAPIKey("ak-xxx"), llm.DoubaoWithModel("ep-xxx"))
+// provider := llm.NewKimiProvider(llm.KimiWithAPIKey("sk-xxx"))
+// provider := llm.NewGLMProvider(llm.GLMWithAPIKey("xxx.xxx"))
+// provider := llm.NewGPTProvider(llm.GPTWithAPIKey("sk-xxx"))
 
 // 2. 注册工具
 registry := tool.NewRegistry()
@@ -107,7 +124,15 @@ err := provider.ChatStream(ctx, llm.ChatParams{
 ```
 pkg/
 ├── schema/          # 核心类型（ToolDefinition, ToolCall），零依赖
-├── llm/             # Provider 接口 + Claude / MiniMax 实现
+├── llm/             # Provider 接口 + 多 Provider 实现
+│   ├── openai_compat.go  # OpenAI 兼容 Provider 基础实现
+│   ├── claude.go    # Claude (Anthropic SDK)
+│   ├── minimax.go   # MiniMax
+│   ├── deepseek.go  # Deepseek
+│   ├── doubao.go    # Doubao (豆包/火山引擎)
+│   ├── kimi.go      # Kimi (Moonshot AI)
+│   ├── glm.go       # GLM (智谱 AI)
+│   ├── gpt.go       # GPT (OpenAI)
 │   └── stream.go    # 流式事件类型（PartialResponse, StreamEvent*）
 ├── memory/
 │   ├── store/       # 消息存储接口 + 内存实现
@@ -158,7 +183,7 @@ type Provider interface {
 }
 ```
 
-所有 Provider 实现（Claude、MiniMax）均实现此接口，可自由替换。
+所有 Provider 实现（Claude、MiniMax、Deepseek、Doubao、Kimi、GLM、GPT）均实现此接口，可自由替换。
 
 ## 可观测性（可选启用）
 
@@ -345,7 +370,7 @@ open ./cmd/trace-viewer/index.html
 
 ## 接下来计划
 
-1. 支持更多的模型产商
+1. ~~支持更多的模型厂商~~ ✅ 已支持 7 个 Provider
 2. 扩展 Tool 系统（Tool 并发执行、Tool 异步调用）
 3. 支持更多编排模式（A2A 协议、状态机编排）
 

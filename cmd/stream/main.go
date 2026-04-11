@@ -28,7 +28,7 @@ type StreamProvider interface {
 var thinkRegex = regexp.MustCompile(`(?s)<think>.*?</think>\s*`)
 
 var (
-	flagProvider = flag.String("provider", "minimax", "Provider to use: minimax or claude")
+	flagProvider = flag.String("provider", "minimax", "Provider: claude, minimax, deepseek, doubao, kimi, glm, gpt")
 	flagAPIKey   = flag.String("api-key", "", "API key (or set MINIMAX_API_KEY / ANTHROPIC_API_KEY env var)")
 	flagBaseURL  = flag.String("base-url", "", "Custom API base URL (e.g. for proxy/relay)")
 	flagTask     = flag.String("task", "", "Run a single task and exit (non-REPL mode). Example: -task='你好，帮我看一下当前项目有哪些文件。'")
@@ -37,50 +37,7 @@ var (
 func main() {
 	flag.Parse()
 
-	var provider StreamProvider
-	switch strings.ToLower(*flagProvider) {
-	case "minimax":
-		opts := []llm.MiniMaxOption{}
-		apiKey := *flagAPIKey
-		if apiKey == "" {
-			apiKey = os.Getenv("MINIMAX_API_KEY")
-		}
-		if apiKey != "" {
-			opts = append(opts, llm.MiniMaxWithAPIKey(apiKey))
-		}
-		if *flagBaseURL != "" {
-			opts = append(opts, llm.MiniMaxWithBaseURL(*flagBaseURL))
-		}
-		if apiKey == "" {
-			fmt.Fprintln(os.Stderr, "Error: MINIMAX_API_KEY not set (use -api-key or set env)")
-			os.Exit(1)
-		}
-		provider = llm.NewMiniMaxProvider(opts...)
-	case "claude":
-		opts := []llm.ClaudeOption{}
-		apiKey := *flagAPIKey
-		if apiKey == "" {
-			apiKey = os.Getenv("ANTHROPIC_API_KEY")
-		}
-		if apiKey != "" {
-			opts = append(opts, llm.WithAPIKey(apiKey))
-		}
-		baseURL := *flagBaseURL
-		if baseURL == "" {
-			baseURL = os.Getenv("ANTHROPIC_BASE_URL")
-		}
-		if baseURL != "" {
-			opts = append(opts, llm.WithBaseURL(baseURL))
-		}
-		if apiKey == "" {
-			fmt.Fprintln(os.Stderr, "Error: ANTHROPIC_API_KEY not set (use -api-key or set env)")
-			os.Exit(1)
-		}
-		provider = llm.NewClaudeProvider(opts...)
-	default:
-		fmt.Fprintf(os.Stderr, "unknown provider %q (use minimax or claude)\n", *flagProvider)
-		os.Exit(1)
-	}
+	provider := newStreamProvider(*flagProvider, *flagAPIKey, *flagBaseURL)
 
 	// Register tools
 	registry := tool.NewRegistry()
@@ -231,7 +188,7 @@ func runStreamTask(ctx context.Context, provider StreamProvider, registry *tool.
 func runStreamREPL(ctx context.Context, provider StreamProvider, registry *tool.Registry) {
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("Agora Streaming REPL")
-	fmt.Println("Usage: go run ./cmd/stream/ -provider claude|minimax [-api-key KEY] [-base-url URL]")
+	fmt.Println("Usage: go run ./cmd/stream/ -provider claude|minimax|deepseek|doubao|kimi|glm|gpt [-api-key KEY] [-base-url URL]")
 	fmt.Println("Tools: read_file, run_command")
 	fmt.Println("Tools: read_file, run_command")
 	fmt.Println("Type 'exit' or 'quit' to stop, 'clear' to clear history")
@@ -390,4 +347,117 @@ func parseJSON(s string) map[string]interface{} {
 		return nil
 	}
 	return m
+}
+
+// newStreamProvider creates a StreamProvider based on command-line flags and env vars.
+func newStreamProvider(providerFlag, apiKey, baseURL string) StreamProvider {
+	switch strings.ToLower(providerFlag) {
+	case "minimax":
+		opts := []llm.MiniMaxOption{}
+		key := firstNonEmpty(apiKey, os.Getenv("MINIMAX_API_KEY"))
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "Error: MINIMAX_API_KEY not set (use -api-key or set env)")
+			os.Exit(1)
+		}
+		opts = append(opts, llm.MiniMaxWithAPIKey(key))
+		if baseURL != "" {
+			opts = append(opts, llm.MiniMaxWithBaseURL(baseURL))
+		}
+		return llm.NewMiniMaxProvider(opts...)
+
+	case "claude":
+		opts := []llm.ClaudeOption{}
+		key := firstNonEmpty(apiKey, os.Getenv("ANTHROPIC_API_KEY"))
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "Error: ANTHROPIC_API_KEY not set (use -api-key or set env)")
+			os.Exit(1)
+		}
+		opts = append(opts, llm.WithAPIKey(key))
+		if url := firstNonEmpty(baseURL, os.Getenv("ANTHROPIC_BASE_URL")); url != "" {
+			opts = append(opts, llm.WithBaseURL(url))
+		}
+		return llm.NewClaudeProvider(opts...)
+
+	case "deepseek":
+		opts := []llm.DeepseekOption{}
+		key := firstNonEmpty(apiKey, os.Getenv("DEEPSEEK_API_KEY"))
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "Error: DEEPSEEK_API_KEY not set (use -api-key or set env)")
+			os.Exit(1)
+		}
+		opts = append(opts, llm.DeepseekWithAPIKey(key))
+		if baseURL != "" {
+			opts = append(opts, llm.DeepseekWithBaseURL(baseURL))
+		}
+		return llm.NewDeepseekProvider(opts...)
+
+	case "doubao":
+		opts := []llm.DoubaoOption{}
+		key := firstNonEmpty(apiKey, os.Getenv("ARK_API_KEY"))
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "Error: ARK_API_KEY not set (use -api-key or set env)")
+			os.Exit(1)
+		}
+		opts = append(opts, llm.DoubaoWithAPIKey(key))
+		if model := os.Getenv("ARK_MODEL"); model != "" {
+			opts = append(opts, llm.DoubaoWithModel(model))
+		}
+		if baseURL != "" {
+			opts = append(opts, llm.DoubaoWithBaseURL(baseURL))
+		}
+		return llm.NewDoubaoProvider(opts...)
+
+	case "kimi":
+		opts := []llm.KimiOption{}
+		key := firstNonEmpty(apiKey, os.Getenv("MOONSHOT_API_KEY"))
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "Error: MOONSHOT_API_KEY not set (use -api-key or set env)")
+			os.Exit(1)
+		}
+		opts = append(opts, llm.KimiWithAPIKey(key))
+		if baseURL != "" {
+			opts = append(opts, llm.KimiWithBaseURL(baseURL))
+		}
+		return llm.NewKimiProvider(opts...)
+
+	case "glm":
+		opts := []llm.GLMOption{}
+		key := firstNonEmpty(apiKey, os.Getenv("GLM_API_KEY"))
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "Error: GLM_API_KEY not set (use -api-key or set env)")
+			os.Exit(1)
+		}
+		opts = append(opts, llm.GLMWithAPIKey(key))
+		if baseURL != "" {
+			opts = append(opts, llm.GLMWithBaseURL(baseURL))
+		}
+		return llm.NewGLMProvider(opts...)
+
+	case "gpt":
+		opts := []llm.GPTOption{}
+		key := firstNonEmpty(apiKey, os.Getenv("OPENAI_API_KEY"))
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "Error: OPENAI_API_KEY not set (use -api-key or set env)")
+			os.Exit(1)
+		}
+		opts = append(opts, llm.GPTWithAPIKey(key))
+		if baseURL != "" {
+			opts = append(opts, llm.GPTWithBaseURL(baseURL))
+		}
+		return llm.NewGPTProvider(opts...)
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown provider %q (use claude, minimax, deepseek, doubao, kimi, glm, gpt)\n", providerFlag)
+		os.Exit(1)
+		return nil
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
