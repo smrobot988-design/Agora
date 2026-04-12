@@ -26,14 +26,14 @@ type StreamProvider interface {
 }
 
 var (
-	flagProvider        = flag.String("provider", "minimax", "Provider: claude, minimax, deepseek, doubao, kimi, glm, gpt")
-	flagAPIKey          = flag.String("api-key", "", "API key (or set MINIMAX_API_KEY / ANTHROPIC_API_KEY env var)")
-	flagBaseURL         = flag.String("base-url", "", "Custom API base URL (e.g. for proxy/relay)")
+	flagProvider = flag.String("provider", "minimax", "Provider: claude, minimax, deepseek, doubao, kimi, glm, gpt")
+	flagAPIKey   = flag.String("api-key", "", "API key (or set MINIMAX_API_KEY / ANTHROPIC_API_KEY env var)")
+	flagBaseURL  = flag.String("base-url", "", "Custom API base URL (e.g. for proxy/relay)")
 	flagReasoningMode   = flag.String("reasoning-mode", "auto", "Reasoning parsing mode: auto, none, think-tag")
 	flagShowReasoning   = flag.Bool("show-reasoning", false, "Show reasoning output in real time")
 	flagReasoningOutput = flag.String("reasoning-output", "stderr", "Where to write reasoning output: stderr, stdout, hidden")
 	flagDebugEvents     = flag.Bool("debug-events", false, "Print streaming event debug info to stderr")
-	flagTask            = flag.String("task", "", "Run a single task and exit (non-REPL mode). Example: -task='你好，帮我看一下当前项目有哪些文件。'")
+	flagTask     = flag.String("task", "", "Run a single task and exit (non-REPL mode). Example: -task='你好，帮我看一下当前项目有哪些文件。'")
 )
 
 func main() {
