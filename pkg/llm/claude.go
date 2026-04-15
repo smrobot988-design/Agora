@@ -28,6 +28,11 @@ func WithModel(model anthropic.Model) ClaudeOption {
 	return func(p *ClaudeProvider) { p.model = model }
 }
 
+// WithModelName sets the Claude model to use from a raw model name.
+func WithModelName(model string) ClaudeOption {
+	return func(p *ClaudeProvider) { p.model = anthropic.Model(model) }
+}
+
 // WithMaxTokens sets the maximum tokens for responses.
 func WithMaxTokens(n int64) ClaudeOption {
 	return func(p *ClaudeProvider) { p.maxTokens = n }

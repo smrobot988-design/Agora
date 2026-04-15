@@ -10,10 +10,11 @@ type DeepseekProvider struct {
 }
 
 type deepseekConfig struct {
-	model     string
-	maxTokens int
-	apiKey    string
-	baseURL   string
+	model         string
+	maxTokens     int
+	apiKey        string
+	baseURL       string
+	reasoningMode ReasoningMode
 }
 
 // DeepseekOption configures DeepseekProvider.
@@ -39,25 +40,33 @@ func DeepseekWithBaseURL(url string) DeepseekOption {
 	return func(c *deepseekConfig) { c.baseURL = url }
 }
 
+// DeepseekWithReasoningMode sets how Deepseek output is classified into
+// reasoning and final text content.
+func DeepseekWithReasoningMode(mode ReasoningMode) DeepseekOption {
+	return func(c *deepseekConfig) { c.reasoningMode = mode }
+}
+
 // NewDeepseekProvider creates a Deepseek provider.
 // By default reads DEEPSEEK_API_KEY from environment.
 func NewDeepseekProvider(opts ...DeepseekOption) *DeepseekProvider {
 	cfg := &deepseekConfig{
-		model:     "deepseek-chat",
-		maxTokens: 4096,
-		baseURL:   "https://api.deepseek.com/v1",
+		model:         "deepseek-chat",
+		maxTokens:     4096,
+		baseURL:       "https://api.deepseek.com/v1",
+		reasoningMode: ReasoningModeNone,
 	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 	return &DeepseekProvider{
 		OpenAICompatProvider: NewOpenAICompatProvider(OpenAICompatConfig{
-			Name:      "deepseek",
-			BaseURL:   cfg.baseURL,
-			APIKey:    cfg.apiKey,
-			EnvKey:    "DEEPSEEK_API_KEY",
-			Model:     cfg.model,
-			MaxTokens: cfg.maxTokens,
+			Name:          "deepseek",
+			BaseURL:       cfg.baseURL,
+			APIKey:        cfg.apiKey,
+			EnvKey:        "DEEPSEEK_API_KEY",
+			Model:         cfg.model,
+			MaxTokens:     cfg.maxTokens,
+			ReasoningMode: cfg.reasoningMode,
 		}),
 	}
 }

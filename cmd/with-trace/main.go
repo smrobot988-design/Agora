@@ -105,6 +105,7 @@ func newProvider() llm.Provider {
 	providerFlag := flag.String("provider", "claude", "Provider: claude, minimax, deepseek, doubao, kimi, glm, gpt")
 	apiKey := flag.String("api-key", "", "API key")
 	baseURL := flag.String("base-url", "", "Base URL")
+	model := flag.String("model", "", "Model name (currently claude only; can also use ANTHROPIC_MODEL)")
 	flag.Parse()
 
 	switch *providerFlag {
@@ -125,6 +126,9 @@ func newProvider() llm.Provider {
 		}
 		if url := firstNonEmpty(*baseURL, os.Getenv("ANTHROPIC_BASE_URL")); url != "" {
 			opts = append(opts, llm.WithBaseURL(url))
+		}
+		if name := firstNonEmpty(*model, os.Getenv("ANTHROPIC_MODEL")); name != "" {
+			opts = append(opts, llm.WithModelName(name))
 		}
 		return llm.NewClaudeProvider(opts...)
 

@@ -32,9 +32,10 @@ func main() {
 	providerFlag := flag.String("provider", "claude", "Provider: claude, minimax, deepseek, doubao, kimi, glm, gpt")
 	apiKey := flag.String("api-key", "", "API key")
 	baseURL := flag.String("base-url", "", "Base URL (claude only)")
+	model := flag.String("model", "", "Model name (currently claude only; can also use ANTHROPIC_MODEL)")
 	flag.Parse()
 
-	provider := newProvider(*providerFlag, *apiKey, *baseURL)
+	provider := newProvider(*providerFlag, *apiKey, *baseURL, *model)
 	fmt.Printf("Provider: %s\n", provider.Name())
 
 	// 注册工具
@@ -84,7 +85,7 @@ func mustRegister(r *tool.Registry, t tool.Tool) {
 }
 
 // newProvider creates a Provider based on command-line flags and env vars.
-func newProvider(providerFlag, apiKey, baseURL string) llm.Provider {
+func newProvider(providerFlag, apiKey, baseURL, model string) llm.Provider {
 	switch providerFlag {
 	case "minimax":
 		opts := []llm.MiniMaxOption{}
@@ -103,6 +104,9 @@ func newProvider(providerFlag, apiKey, baseURL string) llm.Provider {
 		}
 		if url := firstNonEmpty(baseURL, os.Getenv("ANTHROPIC_BASE_URL")); url != "" {
 			opts = append(opts, llm.WithBaseURL(url))
+		}
+		if name := firstNonEmpty(model, os.Getenv("ANTHROPIC_MODEL")); name != "" {
+			opts = append(opts, llm.WithModelName(name))
 		}
 		return llm.NewClaudeProvider(opts...)
 

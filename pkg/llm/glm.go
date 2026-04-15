@@ -10,10 +10,11 @@ type GLMProvider struct {
 }
 
 type glmConfig struct {
-	model     string
-	maxTokens int
-	apiKey    string
-	baseURL   string
+	model         string
+	maxTokens     int
+	apiKey        string
+	baseURL       string
+	reasoningMode ReasoningMode
 }
 
 // GLMOption configures GLMProvider.
@@ -39,25 +40,33 @@ func GLMWithBaseURL(url string) GLMOption {
 	return func(c *glmConfig) { c.baseURL = url }
 }
 
+// GLMWithReasoningMode sets how GLM output is classified into
+// reasoning and final text content.
+func GLMWithReasoningMode(mode ReasoningMode) GLMOption {
+	return func(c *glmConfig) { c.reasoningMode = mode }
+}
+
 // NewGLMProvider creates a GLM (Zhipu AI) provider.
 // By default reads GLM_API_KEY from environment.
 func NewGLMProvider(opts ...GLMOption) *GLMProvider {
 	cfg := &glmConfig{
-		model:     "glm-4",
-		maxTokens: 4096,
-		baseURL:   "https://open.bigmodel.cn/api/paas/v4",
+		model:         "glm-4",
+		maxTokens:     4096,
+		baseURL:       "https://open.bigmodel.cn/api/paas/v4",
+		reasoningMode: ReasoningModeNone,
 	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 	return &GLMProvider{
 		OpenAICompatProvider: NewOpenAICompatProvider(OpenAICompatConfig{
-			Name:      "glm",
-			BaseURL:   cfg.baseURL,
-			APIKey:    cfg.apiKey,
-			EnvKey:    "GLM_API_KEY",
-			Model:     cfg.model,
-			MaxTokens: cfg.maxTokens,
+			Name:          "glm",
+			BaseURL:       cfg.baseURL,
+			APIKey:        cfg.apiKey,
+			EnvKey:        "GLM_API_KEY",
+			Model:         cfg.model,
+			MaxTokens:     cfg.maxTokens,
+			ReasoningMode: cfg.reasoningMode,
 		}),
 	}
 }

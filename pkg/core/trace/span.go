@@ -41,6 +41,7 @@ type Span struct {
 // ResultSnapshot captures the final result of an agent run.
 type ResultSnapshot struct {
 	Text              string `json:"text"`
+	ReasoningText     string `json:"reasoning_text,omitempty"`
 	TotalInputTokens  int    `json:"total_input_tokens"`
 	TotalOutputTokens int    `json:"total_output_tokens"`
 	Turns             int    `json:"turns"`

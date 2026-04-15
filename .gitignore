@@ -33,3 +33,4 @@ go.work.sum
 .claude/
 Agora_Framework_Plan.md
 CLAUDE.md
+.gocache

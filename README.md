@@ -49,6 +49,7 @@ go run ./cmd/stream/ -provider claude
 # 方式 1：环境变量
 export ANTHROPIC_API_KEY=your_key           # Claude
 export ANTHROPIC_BASE_URL=https://proxy.example.com  # Claude 第三方代理
+export ANTHROPIC_MODEL=claude-sonnet-4-6   # Claude 模型名；ccodezh 中转可用 claude-sonnet-4-6-n
 export MINIMAX_API_KEY=your_key             # MiniMax
 export DEEPSEEK_API_KEY=your_key            # Deepseek
 export ARK_API_KEY=your_key                 # Doubao (豆包/火山引擎)
@@ -63,6 +64,7 @@ echo "DEEPSEEK_API_KEY=sk-xxx" >> .local.env
 
 # 方式 3：命令行 flag
 go run ./cmd/example/ -api-key=sk-xxx -base-url=https://proxy.example.com
+go run ./cmd/example/ -provider claude -base-url=https://api.ccodezh.com -model=claude-sonnet-4-6-n
 ```
 
 ### 5 分钟上手

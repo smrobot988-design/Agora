@@ -11,10 +11,11 @@ type MiniMaxProvider struct {
 
 // miniMaxConfig collects option values before construction.
 type miniMaxConfig struct {
-	model     string
-	maxTokens int
-	apiKey    string
-	baseURL   string
+	model         string
+	maxTokens     int
+	apiKey        string
+	baseURL       string
+	reasoningMode ReasoningMode
 }
 
 // MiniMaxOption configures MiniMaxProvider.
@@ -40,25 +41,33 @@ func MiniMaxWithBaseURL(url string) MiniMaxOption {
 	return func(c *miniMaxConfig) { c.baseURL = url }
 }
 
+// MiniMaxWithReasoningMode sets how MiniMax output is classified into
+// reasoning and final text content.
+func MiniMaxWithReasoningMode(mode ReasoningMode) MiniMaxOption {
+	return func(c *miniMaxConfig) { c.reasoningMode = mode }
+}
+
 // NewMiniMaxProvider creates a MiniMax provider.
 // By default reads MINIMAX_API_KEY from environment.
 func NewMiniMaxProvider(opts ...MiniMaxOption) *MiniMaxProvider {
 	cfg := &miniMaxConfig{
-		model:     "MiniMax-M2.7",
-		maxTokens: 4096,
-		baseURL:   "https://api.minimax.chat/v1",
+		model:         "MiniMax-M2.7",
+		maxTokens:     4096,
+		baseURL:       "https://api.minimax.chat/v1",
+		reasoningMode: ReasoningModeThinkTag,
 	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 	return &MiniMaxProvider{
 		OpenAICompatProvider: NewOpenAICompatProvider(OpenAICompatConfig{
-			Name:      "minimax",
-			BaseURL:   cfg.baseURL,
-			APIKey:    cfg.apiKey,
-			EnvKey:    "MINIMAX_API_KEY",
-			Model:     cfg.model,
-			MaxTokens: cfg.maxTokens,
+			Name:          "minimax",
+			BaseURL:       cfg.baseURL,
+			APIKey:        cfg.apiKey,
+			EnvKey:        "MINIMAX_API_KEY",
+			Model:         cfg.model,
+			MaxTokens:     cfg.maxTokens,
+			ReasoningMode: cfg.reasoningMode,
 		}),
 	}
 }

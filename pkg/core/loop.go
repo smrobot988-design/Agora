@@ -165,6 +165,9 @@ func (a *Agent) logResponse(tc *TurnContext) *TurnContext {
 	if resp.Text != "" {
 		slog.Debug("LLM text output", "turn", tc.turn, "text", resp.Text)
 	}
+	if resp.ReasoningText != "" {
+		slog.Debug("LLM reasoning output", "turn", tc.turn, "reasoning", resp.ReasoningText)
+	}
 
 	for _, calledTool := range resp.ToolCalls {
 		slog.Info("tool call",
@@ -204,6 +207,7 @@ func (a *Agent) route(tc *TurnContext) *TurnContext {
 	switch decision.Action {
 	case ActionFinal:
 		tc.result.Text = decision.Text
+		tc.result.ReasoningText = tc.response.ReasoningText
 		tc.isDone = true
 
 	case ActionToolCall:
@@ -313,11 +317,12 @@ func (a *Agent) executeTools(ctx context.Context, tc *TurnContext) *TurnContext 
 
 // streamAccumulator collects streaming events into a complete *llm.Response.
 type streamAccumulator struct {
-	text         string
-	toolCalls    map[int]*accumulatedToolCall
-	inputTokens  int
-	outputTokens int
-	stopReason   llm.StopReason
+	text          string
+	reasoningText string
+	toolCalls     map[int]*accumulatedToolCall
+	inputTokens   int
+	outputTokens  int
+	stopReason    llm.StopReason
 }
 
 type accumulatedToolCall struct {
@@ -337,6 +342,8 @@ func (acc *streamAccumulator) onEvent(event *llm.PartialResponse) {
 	switch event.Type {
 	case llm.StreamEventTextDelta:
 		acc.text += event.TextDelta
+	case llm.StreamEventReasoningDelta:
+		acc.reasoningText += event.ReasoningDelta
 	case llm.StreamEventToolDelta:
 		if event.ToolCallDelta == nil {
 			break
@@ -375,10 +382,11 @@ func (acc *streamAccumulator) toResponse() *llm.Response {
 		}
 	}
 	return &llm.Response{
-		StopReason:   acc.stopReason,
-		Text:         acc.text,
-		ToolCalls:    sorted,
-		InputTokens:  acc.inputTokens,
-		OutputTokens: acc.outputTokens,
+		StopReason:    acc.stopReason,
+		Text:          acc.text,
+		ReasoningText: acc.reasoningText,
+		ToolCalls:     sorted,
+		InputTokens:   acc.inputTokens,
+		OutputTokens:  acc.outputTokens,
 	}
 }

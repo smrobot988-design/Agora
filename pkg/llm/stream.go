@@ -10,10 +10,11 @@ var ErrStreamingUnsupported = errors.New("streaming not supported by this provid
 type StreamEventType string
 
 const (
-	StreamEventTextDelta StreamEventType = "text_delta"
-	StreamEventToolDelta StreamEventType = "tool_delta"
-	StreamEventStop      StreamEventType = "stop"
-	StreamEventUsage     StreamEventType = "usage"
+	StreamEventTextDelta      StreamEventType = "text_delta"
+	StreamEventReasoningDelta StreamEventType = "reasoning_delta"
+	StreamEventToolDelta      StreamEventType = "tool_delta"
+	StreamEventStop           StreamEventType = "stop"
+	StreamEventUsage          StreamEventType = "usage"
 )
 
 // PartialResponse represents a single event in a streaming response.
@@ -24,6 +25,9 @@ type PartialResponse struct {
 
 	// TextDelta is non-empty when Type == StreamEventTextDelta.
 	TextDelta string
+
+	// ReasoningDelta is non-empty when Type == StreamEventReasoningDelta.
+	ReasoningDelta string
 
 	// ToolCallDelta is non-nil when Type == StreamEventToolDelta.
 	ToolCallDelta *ToolCallDelta

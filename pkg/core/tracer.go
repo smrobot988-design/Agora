@@ -83,6 +83,7 @@ func (s *activeSpan) EndTool(output string, err error) {
 func (t *Tracer) FinalizeSnapshot(result *Result) {
 	t.trace.Finalize(&trace.ResultSnapshot{
 		Text:              result.Text,
+		ReasoningText:     result.ReasoningText,
 		TotalInputTokens:  result.TotalInputTokens,
 		TotalOutputTokens: result.TotalOutputTokens,
 		Turns:             result.Turns,

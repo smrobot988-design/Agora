@@ -11,10 +11,11 @@ type DoubaoProvider struct {
 }
 
 type doubaoConfig struct {
-	model     string
-	maxTokens int
-	apiKey    string
-	baseURL   string
+	model         string
+	maxTokens     int
+	apiKey        string
+	baseURL       string
+	reasoningMode ReasoningMode
 }
 
 // DoubaoOption configures DoubaoProvider.
@@ -42,26 +43,34 @@ func DoubaoWithBaseURL(url string) DoubaoOption {
 	return func(c *doubaoConfig) { c.baseURL = url }
 }
 
+// DoubaoWithReasoningMode sets how Doubao output is classified into
+// reasoning and final text content.
+func DoubaoWithReasoningMode(mode ReasoningMode) DoubaoOption {
+	return func(c *doubaoConfig) { c.reasoningMode = mode }
+}
+
 // NewDoubaoProvider creates a Doubao provider.
 // By default reads ARK_API_KEY from environment.
 // You must set the endpoint ID via DoubaoWithModel (e.g. "ep-20240901xxxxx").
 func NewDoubaoProvider(opts ...DoubaoOption) *DoubaoProvider {
 	cfg := &doubaoConfig{
-		model:     "", // user must specify endpoint ID
-		maxTokens: 4096,
-		baseURL:   "https://ark.cn-beijing.volces.com/api/v3",
+		model:         "", // user must specify endpoint ID
+		maxTokens:     4096,
+		baseURL:       "https://ark.cn-beijing.volces.com/api/v3",
+		reasoningMode: ReasoningModeNone,
 	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 	return &DoubaoProvider{
 		OpenAICompatProvider: NewOpenAICompatProvider(OpenAICompatConfig{
-			Name:      "doubao",
-			BaseURL:   cfg.baseURL,
-			APIKey:    cfg.apiKey,
-			EnvKey:    "ARK_API_KEY",
-			Model:     cfg.model,
-			MaxTokens: cfg.maxTokens,
+			Name:          "doubao",
+			BaseURL:       cfg.baseURL,
+			APIKey:        cfg.apiKey,
+			EnvKey:        "ARK_API_KEY",
+			Model:         cfg.model,
+			MaxTokens:     cfg.maxTokens,
+			ReasoningMode: cfg.reasoningMode,
 		}),
 	}
 }

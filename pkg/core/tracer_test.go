@@ -122,6 +122,7 @@ func TestTracerFinalizeSnapshot(t *testing.T) {
 
 	result := &Result{
 		Text:              "final answer",
+		ReasoningText:     "reasoning",
 		TotalInputTokens:  100,
 		TotalOutputTokens: 50,
 		Turns:             3,
@@ -133,6 +134,9 @@ func TestTracerFinalizeSnapshot(t *testing.T) {
 	}
 	if tracer.trace.Result.Text != "final answer" {
 		t.Fatalf("expected text 'final answer', got %q", tracer.trace.Result.Text)
+	}
+	if tracer.trace.Result.ReasoningText != "reasoning" {
+		t.Fatalf("expected reasoning text, got %q", tracer.trace.Result.ReasoningText)
 	}
 	if tracer.trace.Result.TotalInputTokens != 100 {
 		t.Fatalf("expected 100 input tokens, got %d", tracer.trace.Result.TotalInputTokens)

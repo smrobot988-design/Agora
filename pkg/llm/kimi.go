@@ -10,10 +10,11 @@ type KimiProvider struct {
 }
 
 type kimiConfig struct {
-	model     string
-	maxTokens int
-	apiKey    string
-	baseURL   string
+	model         string
+	maxTokens     int
+	apiKey        string
+	baseURL       string
+	reasoningMode ReasoningMode
 }
 
 // KimiOption configures KimiProvider.
@@ -39,25 +40,33 @@ func KimiWithBaseURL(url string) KimiOption {
 	return func(c *kimiConfig) { c.baseURL = url }
 }
 
+// KimiWithReasoningMode sets how Kimi output is classified into
+// reasoning and final text content.
+func KimiWithReasoningMode(mode ReasoningMode) KimiOption {
+	return func(c *kimiConfig) { c.reasoningMode = mode }
+}
+
 // NewKimiProvider creates a Kimi (Moonshot AI) provider.
 // By default reads MOONSHOT_API_KEY from environment.
 func NewKimiProvider(opts ...KimiOption) *KimiProvider {
 	cfg := &kimiConfig{
-		model:     "moonshot-v1-8k",
-		maxTokens: 4096,
-		baseURL:   "https://api.moonshot.cn/v1",
+		model:         "moonshot-v1-8k",
+		maxTokens:     4096,
+		baseURL:       "https://api.moonshot.cn/v1",
+		reasoningMode: ReasoningModeNone,
 	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 	return &KimiProvider{
 		OpenAICompatProvider: NewOpenAICompatProvider(OpenAICompatConfig{
-			Name:      "kimi",
-			BaseURL:   cfg.baseURL,
-			APIKey:    cfg.apiKey,
-			EnvKey:    "MOONSHOT_API_KEY",
-			Model:     cfg.model,
-			MaxTokens: cfg.maxTokens,
+			Name:          "kimi",
+			BaseURL:       cfg.baseURL,
+			APIKey:        cfg.apiKey,
+			EnvKey:        "MOONSHOT_API_KEY",
+			Model:         cfg.model,
+			MaxTokens:     cfg.maxTokens,
+			ReasoningMode: cfg.reasoningMode,
 		}),
 	}
 }

@@ -63,7 +63,8 @@ func (m *Memory) AddAssistantMessage(text string) error {
 
 // AddAssistantResponse appends an assistant message built from an LLM Response.
 // It constructs ContentBlocks from the Response's text and tool calls,
-// preserving the structure needed for follow-up API calls.
+// preserving the structure needed for follow-up API calls. ReasoningText is
+// intentionally not written back into the conversation history.
 func (m *Memory) AddAssistantResponse(resp *llm.Response) error {
 	var blocks []llm.ContentBlock
 	if resp.Text != "" {
@@ -187,8 +188,8 @@ func (m *Memory) LastToolResults() ([]llm.ToolResult, error) {
 			if block.Type == llm.BlockToolResult {
 				results = append(results, llm.ToolResult{
 					ToolCallID: block.ToolResult.ToolCallID,
-					Content:   block.ToolResult.Content,
-					IsError:   block.ToolResult.IsError,
+					Content:    block.ToolResult.Content,
+					IsError:    block.ToolResult.IsError,
 				})
 			}
 		}

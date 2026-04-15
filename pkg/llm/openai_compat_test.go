@@ -3,6 +3,7 @@ package llm
 import (
 	"testing"
 
+	"github.com/sashabaranov/go-openai"
 	"github.com/smrobot988-design/Agora/pkg/schema"
 )
 
@@ -111,5 +112,26 @@ func TestConvertToolsToOpenAI(t *testing.T) {
 	}
 	if result[0].Function.Name != "get_weather" {
 		t.Fatalf("expected name 'get_weather', got %s", result[0].Function.Name)
+	}
+}
+
+func TestConvertResponseFromGoOpenAIClassifiesReasoning(t *testing.T) {
+	resp := openai.ChatCompletionResponse{
+		Choices: []openai.ChatCompletionChoice{
+			{
+				FinishReason: "stop",
+				Message: openai.ChatCompletionMessage{
+					Content: "<think>hidden</think>visible",
+				},
+			},
+		},
+	}
+
+	result := convertResponseFromGoOpenAI(resp, ReasoningModeThinkTag)
+	if result.Text != "visible" {
+		t.Fatalf("expected visible text, got %q", result.Text)
+	}
+	if result.ReasoningText != "hidden" {
+		t.Fatalf("expected reasoning text, got %q", result.ReasoningText)
 	}
 }

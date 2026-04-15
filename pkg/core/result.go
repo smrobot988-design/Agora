@@ -5,6 +5,9 @@ type Result struct {
 	// Text is the final text response from the LLM.
 	Text string
 
+	// ReasoningText is the final reasoning content from the LLM.
+	ReasoningText string
+
 	// TotalInputTokens is the cumulative input tokens across all LLM calls.
 	TotalInputTokens int
 

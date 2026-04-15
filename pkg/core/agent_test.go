@@ -25,10 +25,30 @@ func (m *mockProvider) Chat(ctx context.Context, params llm.ChatParams) (*llm.Re
 	return resp, nil
 }
 
-func (m *mockProvider) Name() string                        { return "mock" }
+func (m *mockProvider) Name() string                          { return "mock" }
 func (m *mockProvider) EstimateTokens(msgs []llm.Message) int { return 100 }
 func (m *mockProvider) ChatStream(ctx context.Context, params llm.ChatParams, cb func(*llm.PartialResponse)) error {
 	return llm.ErrStreamingUnsupported
+}
+
+type streamMockProvider struct {
+	events []*llm.PartialResponse
+}
+
+func (m *streamMockProvider) Chat(ctx context.Context, params llm.ChatParams) (*llm.Response, error) {
+	return nil, fmt.Errorf("unexpected non-streaming chat")
+}
+
+func (m *streamMockProvider) Name() string { return "stream-mock" }
+
+func (m *streamMockProvider) EstimateTokens(msgs []llm.Message) int { return 100 }
+
+func (m *streamMockProvider) ChatStream(ctx context.Context, params llm.ChatParams, cb func(*llm.PartialResponse)) error {
+	for _, event := range m.events {
+		cb(event)
+	}
+	cb(nil)
+	return nil
 }
 
 // newTestAgent creates an Agent with mock provider, a simple echo tool, and the given responses.
@@ -113,8 +133,8 @@ func TestRunToolExecutionError(t *testing.T) {
 
 	provider := &mockProvider{responses: []*llm.Response{
 		{
-			StopReason: llm.StopReasonToolUse,
-			ToolCalls:  []schema.ToolCall{{ID: "c1", Name: "fail_tool"}},
+			StopReason:  llm.StopReasonToolUse,
+			ToolCalls:   []schema.ToolCall{{ID: "c1", Name: "fail_tool"}},
 			InputTokens: 10, OutputTokens: 5,
 		},
 		{
@@ -154,8 +174,8 @@ func TestRunMaxTurnsExceeded(t *testing.T) {
 	responses := make([]*llm.Response, 5)
 	for i := range responses {
 		responses[i] = &llm.Response{
-			StopReason: llm.StopReasonToolUse,
-			ToolCalls:  []schema.ToolCall{{ID: fmt.Sprintf("c%d", i), Name: "echo", Input: map[string]interface{}{"message": "loop"}}},
+			StopReason:  llm.StopReasonToolUse,
+			ToolCalls:   []schema.ToolCall{{ID: fmt.Sprintf("c%d", i), Name: "echo", Input: map[string]interface{}{"message": "loop"}}},
 			InputTokens: 10, OutputTokens: 5,
 		}
 	}
@@ -184,8 +204,8 @@ func TestRunContextCancellation(t *testing.T) {
 func TestRunTokenAccumulation(t *testing.T) {
 	agent := newTestAgent(t, []*llm.Response{
 		{
-			StopReason: llm.StopReasonToolUse,
-			ToolCalls:  []schema.ToolCall{{ID: "c1", Name: "echo", Input: map[string]interface{}{"message": "a"}}},
+			StopReason:  llm.StopReasonToolUse,
+			ToolCalls:   []schema.ToolCall{{ID: "c1", Name: "echo", Input: map[string]interface{}{"message": "a"}}},
 			InputTokens: 100, OutputTokens: 50,
 		},
 		{
@@ -248,6 +268,52 @@ func TestRunMultipleToolCalls(t *testing.T) {
 	}
 	if callCount != 2 {
 		t.Fatalf("expected 2 tool calls, got %d", callCount)
+	}
+}
+
+func TestRunStreamingReasoningResult(t *testing.T) {
+	provider := &streamMockProvider{events: []*llm.PartialResponse{
+		{Type: llm.StreamEventReasoningDelta, ReasoningDelta: "thinking"},
+		{Type: llm.StreamEventTextDelta, TextDelta: "final"},
+		{Type: llm.StreamEventUsage, InputTokens: 10, OutputTokens: 5},
+		{Type: llm.StreamEventStop, StopReason: llm.StopReasonEndTurn},
+	}}
+	mem := NewMemory()
+	registry := tool.NewRegistry()
+	var eventTypes []llm.StreamEventType
+
+	agent := NewAgent(provider, mem, registry, WithStreamCallback(func(event *llm.PartialResponse) {
+		if event != nil {
+			eventTypes = append(eventTypes, event.Type)
+		}
+	}))
+
+	result, err := agent.Run(context.Background(), "Hi")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Text != "final" {
+		t.Fatalf("expected final text, got %q", result.Text)
+	}
+	if result.ReasoningText != "thinking" {
+		t.Fatalf("expected reasoning text, got %q", result.ReasoningText)
+	}
+	if result.TotalInputTokens != 10 || result.TotalOutputTokens != 5 {
+		t.Fatalf("unexpected token totals: %d in / %d out", result.TotalInputTokens, result.TotalOutputTokens)
+	}
+	if len(eventTypes) < 2 || eventTypes[0] != llm.StreamEventReasoningDelta || eventTypes[1] != llm.StreamEventTextDelta {
+		t.Fatalf("unexpected event types: %v", eventTypes)
+	}
+
+	msgs, err := mem.AllMessages()
+	if err != nil {
+		t.Fatalf("unexpected memory error: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected user and assistant messages, got %d", len(msgs))
+	}
+	if got := msgs[1].Content[0].Text; got != "final" {
+		t.Fatalf("expected memory to store final text only, got %q", got)
 	}
 }
 

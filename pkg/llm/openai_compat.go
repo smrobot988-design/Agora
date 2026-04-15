@@ -19,20 +19,22 @@ import (
 // OpenAICompatProvider implements Provider for any OpenAI-compatible API.
 // It is embedded by concrete providers (MiniMax, Deepseek, GPT, etc.).
 type OpenAICompatProvider struct {
-	client    *openai.Client
-	model     string
-	maxTokens int
-	name      string
+	client        *openai.Client
+	model         string
+	maxTokens     int
+	name          string
+	reasoningMode ReasoningMode
 }
 
 // OpenAICompatConfig holds the construction parameters for OpenAICompatProvider.
 type OpenAICompatConfig struct {
-	Name      string // Provider name for logging/tracing (e.g. "deepseek")
-	BaseURL   string // API endpoint base URL
-	APIKey    string // API key (takes precedence over EnvKey)
-	EnvKey    string // Environment variable name to read API key from
-	Model     string // Default model name
-	MaxTokens int    // Default max completion tokens
+	Name          string        // Provider name for logging/tracing (e.g. "deepseek")
+	BaseURL       string        // API endpoint base URL
+	APIKey        string        // API key (takes precedence over EnvKey)
+	EnvKey        string        // Environment variable name to read API key from
+	Model         string        // Default model name
+	MaxTokens     int           // Default max completion tokens
+	ReasoningMode ReasoningMode // Content classification mode for reasoning output
 }
 
 // NewOpenAICompatProvider creates a generic OpenAI-compatible provider.
@@ -46,10 +48,11 @@ func NewOpenAICompatProvider(cfg OpenAICompatConfig) *OpenAICompatProvider {
 		ocfg.BaseURL = cfg.BaseURL
 	}
 	return &OpenAICompatProvider{
-		client:    openai.NewClientWithConfig(ocfg),
-		model:     cfg.Model,
-		maxTokens: cfg.MaxTokens,
-		name:      cfg.Name,
+		client:        openai.NewClientWithConfig(ocfg),
+		model:         cfg.Model,
+		maxTokens:     cfg.MaxTokens,
+		name:          cfg.Name,
+		reasoningMode: cfg.ReasoningMode,
 	}
 }
 
@@ -89,7 +92,7 @@ func (p *OpenAICompatProvider) Chat(ctx context.Context, chatParams ChatParams) 
 	if err != nil {
 		return nil, fmt.Errorf("%s chat: %w", p.name, err)
 	}
-	return convertResponseFromGoOpenAI(resp), nil
+	return convertResponseFromGoOpenAI(resp, p.reasoningMode), nil
 }
 
 // ChatStream implements Provider.ChatStream using OpenAI-compatible streaming.
@@ -115,9 +118,12 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatPa
 	}
 	defer stream.Close()
 
+	parser := newReasoningParser(p.reasoningMode)
+
 	for {
 		chunk, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
+			emitClassifiedSegments(cb, parser.Flush())
 			cb(nil) // signal stream end
 			return nil
 		}
@@ -127,10 +133,7 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatPa
 
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content != "" {
-				cb(&PartialResponse{
-					Type:      StreamEventTextDelta,
-					TextDelta: choice.Delta.Content,
-				})
+				emitClassifiedSegments(cb, parser.Consume(choice.Delta.Content))
 			}
 
 			if len(choice.Delta.ToolCalls) > 0 {
@@ -153,6 +156,7 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatPa
 			}
 
 			if choice.FinishReason != "" {
+				emitClassifiedSegments(cb, parser.Flush())
 				stopReason := StopReasonEndTurn
 				switch choice.FinishReason {
 				case "tool_calls":
@@ -267,7 +271,7 @@ func convertToolsToGoOpenAI(tools []schema.ToolDefinition) []openai.Tool {
 	return result
 }
 
-func convertResponseFromGoOpenAI(resp openai.ChatCompletionResponse) *Response {
+func convertResponseFromGoOpenAI(resp openai.ChatCompletionResponse, mode ReasoningMode) *Response {
 	result := &Response{
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
@@ -291,7 +295,7 @@ func convertResponseFromGoOpenAI(resp openai.ChatCompletionResponse) *Response {
 		result.StopReason = StopReason(choice.FinishReason)
 	}
 
-	result.Text = choice.Message.Content
+	result.Text, result.ReasoningText = classifyContent(mode, choice.Message.Content)
 
 	for _, tc := range choice.Message.ToolCalls {
 		var input map[string]interface{}
@@ -304,6 +308,23 @@ func convertResponseFromGoOpenAI(resp openai.ChatCompletionResponse) *Response {
 	}
 
 	return result
+}
+
+func emitClassifiedSegments(cb func(*PartialResponse), segments []contentSegment) {
+	for _, segment := range segments {
+		switch segment.kind {
+		case contentKindReasoning:
+			cb(&PartialResponse{
+				Type:           StreamEventReasoningDelta,
+				ReasoningDelta: segment.text,
+			})
+		default:
+			cb(&PartialResponse{
+				Type:      StreamEventTextDelta,
+				TextDelta: segment.text,
+			})
+		}
+	}
 }
 
 // ============================================================================

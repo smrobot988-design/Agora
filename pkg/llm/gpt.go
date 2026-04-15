@@ -10,10 +10,11 @@ type GPTProvider struct {
 }
 
 type gptConfig struct {
-	model     string
-	maxTokens int
-	apiKey    string
-	baseURL   string
+	model         string
+	maxTokens     int
+	apiKey        string
+	baseURL       string
+	reasoningMode ReasoningMode
 }
 
 // GPTOption configures GPTProvider.
@@ -39,25 +40,33 @@ func GPTWithBaseURL(url string) GPTOption {
 	return func(c *gptConfig) { c.baseURL = url }
 }
 
+// GPTWithReasoningMode sets how GPT output is classified into
+// reasoning and final text content.
+func GPTWithReasoningMode(mode ReasoningMode) GPTOption {
+	return func(c *gptConfig) { c.reasoningMode = mode }
+}
+
 // NewGPTProvider creates an OpenAI GPT provider.
 // By default reads OPENAI_API_KEY and OPENAI_BASE_URL from environment.
 func NewGPTProvider(opts ...GPTOption) *GPTProvider {
 	cfg := &gptConfig{
-		model:     "gpt-5.4",
-		maxTokens: 4096,
-		baseURL:   getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		model:         "gpt-5.4",
+		maxTokens:     4096,
+		baseURL:       getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		reasoningMode: ReasoningModeNone,
 	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 	return &GPTProvider{
 		OpenAICompatProvider: NewOpenAICompatProvider(OpenAICompatConfig{
-			Name:      "gpt",
-			BaseURL:   cfg.baseURL,
-			APIKey:    cfg.apiKey,
-			EnvKey:    "OPENAI_API_KEY",
-			Model:     cfg.model,
-			MaxTokens: cfg.maxTokens,
+			Name:          "gpt",
+			BaseURL:       cfg.baseURL,
+			APIKey:        cfg.apiKey,
+			EnvKey:        "OPENAI_API_KEY",
+			Model:         cfg.model,
+			MaxTokens:     cfg.maxTokens,
+			ReasoningMode: cfg.reasoningMode,
 		}),
 	}
 }

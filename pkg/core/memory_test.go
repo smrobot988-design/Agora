@@ -142,6 +142,24 @@ func TestAddAssistantResponseTextOnly(t *testing.T) {
 	}
 }
 
+func TestAddAssistantResponseIgnoresReasoningText(t *testing.T) {
+	m := NewMemory()
+	resp := &llm.Response{
+		Text:          "Hello!",
+		ReasoningText: "internal reasoning",
+	}
+	if err := m.AddAssistantResponse(resp); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	msgs := mustMessages(t, m)
+	if len(msgs[0].Content) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(msgs[0].Content))
+	}
+	if msgs[0].Content[0].Text != "Hello!" {
+		t.Fatalf("expected final text only, got %q", msgs[0].Content[0].Text)
+	}
+}
+
 func TestAddAssistantResponseToolCallsOnly(t *testing.T) {
 	m := NewMemory()
 	resp := &llm.Response{
@@ -277,9 +295,9 @@ func TestConcurrentAccess(t *testing.T) {
 type failingStore struct{}
 
 func (s *failingStore) Append(msg llm.Message) error     { return fmt.Errorf("append failed") }
-func (s *failingStore) Messages() ([]llm.Message, error)  { return nil, fmt.Errorf("messages failed") }
-func (s *failingStore) Len() (int, error)                 { return 0, fmt.Errorf("len failed") }
-func (s *failingStore) Clear() error                      { return fmt.Errorf("clear failed") }
+func (s *failingStore) Messages() ([]llm.Message, error) { return nil, fmt.Errorf("messages failed") }
+func (s *failingStore) Len() (int, error)                { return 0, fmt.Errorf("len failed") }
+func (s *failingStore) Clear() error                     { return fmt.Errorf("clear failed") }
 
 func TestStoreErrorPropagation(t *testing.T) {
 	m := NewMemory(WithStore(&failingStore{}))
