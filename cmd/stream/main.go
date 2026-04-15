@@ -30,7 +30,10 @@ var (
 	flagAPIKey          = flag.String("api-key", "", "API key (or set MINIMAX_API_KEY / ANTHROPIC_API_KEY env var)")
 	flagBaseURL         = flag.String("base-url", "", "Custom API base URL (e.g. for proxy/relay)")
 	flagModel           = flag.String("model", "", "Override model name (currently claude only; can also use ANTHROPIC_MODEL)")
-	flagReasoningMode   = flag.String("reasoning-mode", "auto", "Reasoning parsing mode: auto, none, think-tag")
+	flagReasoningMode   = flag.String("reasoning-mode", "auto", "Reasoning parsing mode: auto, none, think-tag, native")
+	flagThinkingMode    = flag.String("thinking-mode", "", "Provider thinking mode override: on, off, auto (empty keeps provider default)")
+	flagThinkingEffort  = flag.String("thinking-effort", "", "Provider thinking effort override: low, medium, high, max")
+	flagThinkingBudget  = flag.Int("thinking-budget", 0, "Provider thinking budget tokens (if supported)")
 	flagShowReasoning   = flag.Bool("show-reasoning", false, "Show reasoning output in real time")
 	flagReasoningOutput = flag.String("reasoning-output", "stderr", "Where to write reasoning output: stderr, stdout, hidden")
 	flagDebugEvents     = flag.Bool("debug-events", false, "Print streaming event debug info to stderr")
@@ -45,6 +48,11 @@ func main() {
 		reasoningOutput: *flagReasoningOutput,
 		debugEvents:     *flagDebugEvents,
 	}
+	reasoningConfig, err := buildReasoningConfig(*flagReasoningMode, *flagThinkingMode, *flagThinkingEffort, *flagThinkingBudget)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	provider := newStreamProvider(*flagProvider, *flagAPIKey, *flagBaseURL, *flagModel, *flagReasoningMode)
 
 	// Register tools
@@ -56,9 +64,9 @@ func main() {
 	defer cancel()
 
 	if *flagTask != "" {
-		runStreamTask(ctx, provider, registry, *flagTask, display)
+		runStreamTask(ctx, provider, registry, *flagTask, display, reasoningConfig)
 	} else {
-		runStreamREPL(ctx, provider, registry, display)
+		runStreamREPL(ctx, provider, registry, display, reasoningConfig)
 	}
 }
 
@@ -84,13 +92,14 @@ type streamDisplayOptions struct {
 }
 
 type streamedTurn struct {
-	textDelta      string
-	reasoningDelta string
-	stopReason     llm.StopReason
-	toolCalls      []*activeToolCall
-	hadToolDelta   bool
-	inputTokens    int
-	outputTokens   int
+	textDelta        string
+	reasoningDelta   string
+	appliedReasoning *llm.AppliedReasoning
+	stopReason       llm.StopReason
+	toolCalls        []*activeToolCall
+	hadToolDelta     bool
+	inputTokens      int
+	outputTokens     int
 }
 
 func streamChatTurn(ctx context.Context, provider StreamProvider, params llm.ChatParams, display streamDisplayOptions) (*streamedTurn, error) {
@@ -131,6 +140,9 @@ func streamChatTurn(ctx context.Context, provider StreamProvider, params llm.Cha
 				}
 				fmt.Fprint(reasoningWriter, pr.ReasoningDelta)
 			}
+
+		case llm.StreamEventReasoningApplied:
+			result.appliedReasoning = pr.AppliedReasoning
 
 		case llm.StreamEventToolDelta:
 			closeReasoningSection()
@@ -186,6 +198,22 @@ func debugStreamEvent(pr *llm.PartialResponse) {
 		fmt.Fprintf(os.Stderr, "[event] type=%s len=%d\n", pr.Type, len(pr.TextDelta))
 	case llm.StreamEventReasoningDelta:
 		fmt.Fprintf(os.Stderr, "[event] type=%s len=%d\n", pr.Type, len(pr.ReasoningDelta))
+	case llm.StreamEventReasoningApplied:
+		if pr.AppliedReasoning == nil {
+			fmt.Fprintf(os.Stderr, "[event] type=%s\n", pr.Type)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "[event] type=%s provider=%s source=%s model=%q mode=%s effort=%s budget=%d parse_mode=%s notes=%d\n",
+			pr.Type,
+			pr.AppliedReasoning.Provider,
+			pr.AppliedReasoning.Source,
+			pr.AppliedReasoning.Model,
+			pr.AppliedReasoning.Mode,
+			pr.AppliedReasoning.Effort,
+			pr.AppliedReasoning.BudgetTokens,
+			pr.AppliedReasoning.ParseMode,
+			len(pr.AppliedReasoning.Notes),
+		)
 	case llm.StreamEventToolDelta:
 		if pr.ToolCallDelta == nil {
 			fmt.Fprintf(os.Stderr, "[event] type=%s\n", pr.Type)
@@ -207,10 +235,23 @@ func printTurnSummary(provider string, turn int, result *streamedTurn) {
 		"\n[SUMMARY] provider=%s turn=%d stop_reason=%s text_len=%d reasoning_len=%d tool_calls=%d input_tokens=%d output_tokens=%d\n",
 		provider, turn, result.stopReason, len(result.textDelta), len(result.reasoningDelta), len(result.toolCalls), result.inputTokens, result.outputTokens,
 	)
+	if result.appliedReasoning != nil {
+		fmt.Fprintf(os.Stderr,
+			"[SUMMARY] reasoning provider=%s source=%s model=%q mode=%s effort=%s budget=%d parse_mode=%s notes=%v\n",
+			result.appliedReasoning.Provider,
+			result.appliedReasoning.Source,
+			result.appliedReasoning.Model,
+			result.appliedReasoning.Mode,
+			result.appliedReasoning.Effort,
+			result.appliedReasoning.BudgetTokens,
+			result.appliedReasoning.ParseMode,
+			result.appliedReasoning.Notes,
+		)
+	}
 }
 
 // runStreamTask runs a single task with streaming output and tool execution, then exits.
-func runStreamTask(ctx context.Context, provider StreamProvider, registry *tool.Registry, task string, display streamDisplayOptions) {
+func runStreamTask(ctx context.Context, provider StreamProvider, registry *tool.Registry, task string, display streamDisplayOptions, reasoningConfig llm.ReasoningConfig) {
 	var history []llm.Message
 	history = append(history, llm.NewTextMessage(llm.RoleUser, task))
 
@@ -218,8 +259,9 @@ func runStreamTask(ctx context.Context, provider StreamProvider, registry *tool.
 
 	for turn := 0; turn < 20; turn++ {
 		result, err := streamChatTurn(ctx, provider, llm.ChatParams{
-			Messages: history,
-			Tools:    registry.Definitions(),
+			Messages:  history,
+			Tools:     registry.Definitions(),
+			Reasoning: &reasoningConfig,
 		}, display)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
@@ -283,10 +325,10 @@ func runStreamTask(ctx context.Context, provider StreamProvider, registry *tool.
 }
 
 // runStreamREPL is the interactive REPL mode.
-func runStreamREPL(ctx context.Context, provider StreamProvider, registry *tool.Registry, display streamDisplayOptions) {
+func runStreamREPL(ctx context.Context, provider StreamProvider, registry *tool.Registry, display streamDisplayOptions, reasoningConfig llm.ReasoningConfig) {
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("Agora Streaming REPL")
-	fmt.Println("Usage: go run ./cmd/stream/ -provider claude|minimax|deepseek|doubao|kimi|glm|gpt [-api-key KEY] [-base-url URL] [-model NAME] [-reasoning-mode auto|none|think-tag] [-show-reasoning]")
+	fmt.Println("Usage: go run ./cmd/stream/ -provider claude|minimax|deepseek|doubao|kimi|glm|gpt [-api-key KEY] [-base-url URL] [-model NAME] [-thinking-mode on|off|auto] [-thinking-effort low|medium|high|max] [-thinking-budget TOKENS] [-reasoning-mode auto|none|think-tag|native] [-show-reasoning]")
 	fmt.Println("Tools: read_file, run_command")
 	fmt.Println("Type 'exit' or 'quit' to stop, 'clear' to clear history")
 	fmt.Println()
@@ -320,8 +362,9 @@ func runStreamREPL(ctx context.Context, provider StreamProvider, registry *tool.
 			fmt.Println()
 
 			result, err := streamChatTurn(ctx, provider, llm.ChatParams{
-				Messages: history,
-				Tools:    tools,
+				Messages:  history,
+				Tools:     tools,
+				Reasoning: &reasoningConfig,
 			}, display)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
@@ -444,9 +487,6 @@ func newStreamProvider(providerFlag, apiKey, baseURL, modelName, reasoningModeFl
 		if model := firstNonEmpty(modelName, os.Getenv("ANTHROPIC_MODEL")); model != "" {
 			opts = append(opts, llm.WithModelName(model))
 		}
-		if reasoningModeSet && reasoningMode != llm.ReasoningModeNone {
-			fmt.Fprintf(os.Stderr, "Warning: reasoning-mode=%s is ignored for provider claude\n", reasoningMode)
-		}
 		return llm.NewClaudeProvider(opts...)
 
 	case "deepseek":
@@ -547,9 +587,55 @@ func parseReasoningMode(value string) (llm.ReasoningMode, bool, error) {
 		return llm.ReasoningModeNone, true, nil
 	case "think", "think-tag", "think_tag":
 		return llm.ReasoningModeThinkTag, true, nil
+	case "native":
+		return llm.ReasoningModeNative, true, nil
 	default:
-		return "", false, fmt.Errorf("unknown reasoning mode %q (use auto, none, think-tag)", value)
+		return "", false, fmt.Errorf("unknown reasoning mode %q (use auto, none, think-tag, native)", value)
 	}
+}
+
+func buildReasoningConfig(parseMode, thinkingMode, thinkingEffort string, thinkingBudget int) (llm.ReasoningConfig, error) {
+	config := llm.ReasoningConfig{}
+
+	switch strings.ToLower(strings.TrimSpace(thinkingMode)) {
+	case "", "inherit":
+	case "on":
+		config.Mode = llm.ThinkingModeOn
+	case "off":
+		config.Mode = llm.ThinkingModeOff
+	case "auto":
+		config.Mode = llm.ThinkingModeAuto
+	default:
+		return llm.ReasoningConfig{}, fmt.Errorf("unknown thinking mode %q (use on, off, auto)", thinkingMode)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(thinkingEffort)) {
+	case "", "inherit":
+	case "low":
+		config.Effort = llm.ThinkingEffortLow
+	case "medium":
+		config.Effort = llm.ThinkingEffortMedium
+	case "high":
+		config.Effort = llm.ThinkingEffortHigh
+	case "max":
+		config.Effort = llm.ThinkingEffortMax
+	default:
+		return llm.ReasoningConfig{}, fmt.Errorf("unknown thinking effort %q (use low, medium, high, max)", thinkingEffort)
+	}
+
+	parse, parseSet, err := parseReasoningMode(parseMode)
+	if err != nil {
+		return llm.ReasoningConfig{}, err
+	}
+	if parseSet {
+		config.ParseMode = parse
+	}
+	if thinkingBudget < 0 {
+		return llm.ReasoningConfig{}, fmt.Errorf("thinking-budget must be >= 0")
+	}
+	config.BudgetTokens = thinkingBudget
+
+	return config.Normalize(), nil
 }
 
 func firstNonEmpty(values ...string) string {

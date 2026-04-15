@@ -1,5 +1,7 @@
 package core
 
+import "github.com/smrobot988-design/Agora/pkg/llm"
+
 // Result is returned from Agent.Run with the final output and execution metadata.
 type Result struct {
 	// Text is the final text response from the LLM.
@@ -7,6 +9,9 @@ type Result struct {
 
 	// ReasoningText is the final reasoning content from the LLM.
 	ReasoningText string
+
+	// AppliedReasoning describes how Agora actually handled provider reasoning.
+	AppliedReasoning *llm.AppliedReasoning
 
 	// TotalInputTokens is the cumulative input tokens across all LLM calls.
 	TotalInputTokens int

@@ -135,3 +135,25 @@ func TestConvertResponseFromGoOpenAIClassifiesReasoning(t *testing.T) {
 		t.Fatalf("expected reasoning text, got %q", result.ReasoningText)
 	}
 }
+
+func TestConvertResponseFromGoOpenAINativeReasoning(t *testing.T) {
+	resp := openai.ChatCompletionResponse{
+		Choices: []openai.ChatCompletionChoice{
+			{
+				FinishReason: "stop",
+				Message: openai.ChatCompletionMessage{
+					Content:          "visible",
+					ReasoningContent: "hidden",
+				},
+			},
+		},
+	}
+
+	result := convertResponseFromGoOpenAI(resp, ReasoningModeNative)
+	if result.Text != "visible" {
+		t.Fatalf("expected visible text, got %q", result.Text)
+	}
+	if result.ReasoningText != "hidden" {
+		t.Fatalf("expected native reasoning text, got %q", result.ReasoningText)
+	}
+}

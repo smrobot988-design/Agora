@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	_ "github.com/smrobot988-design/Agora/pkg/config"
 	"github.com/smrobot988-design/Agora/pkg/core"
@@ -33,8 +34,16 @@ func main() {
 	apiKey := flag.String("api-key", "", "API key")
 	baseURL := flag.String("base-url", "", "Base URL (claude only)")
 	model := flag.String("model", "", "Model name (currently claude only; can also use ANTHROPIC_MODEL)")
+	reasoningMode := flag.String("reasoning-mode", "auto", "Reasoning parsing mode: auto, none, think-tag, native")
+	thinkingMode := flag.String("thinking-mode", "", "Provider thinking mode override: on, off, auto")
+	thinkingEffort := flag.String("thinking-effort", "", "Provider thinking effort override: low, medium, high, max")
+	thinkingBudget := flag.Int("thinking-budget", 0, "Provider thinking budget tokens (if supported)")
 	flag.Parse()
 
+	reasoningConfig, err := buildReasoningConfig(*reasoningMode, *thinkingMode, *thinkingEffort, *thinkingBudget)
+	if err != nil {
+		log.Fatalf("reasoning config: %v", err)
+	}
 	provider := newProvider(*providerFlag, *apiKey, *baseURL, *model)
 	fmt.Printf("Provider: %s\n", provider.Name())
 
@@ -66,7 +75,7 @@ func main() {
 	)
 
 	// 纯净的 Agent：只有 provider + registry + max turns
-	agent := core.NewAgent(provider, mem, registry, core.WithMaxTurns(5))
+	agent := core.NewAgent(provider, mem, registry, core.WithMaxTurns(5), core.WithReasoningConfig(reasoningConfig))
 
 	result, err := agent.Run(context.Background(), "What's the weather in San Francisco?")
 	if err != nil {
@@ -74,6 +83,17 @@ func main() {
 	}
 
 	fmt.Printf("\nResponse: %s\n", result.Text)
+	if result.AppliedReasoning != nil {
+		fmt.Printf("Applied reasoning: source=%s model=%s mode=%s effort=%s budget=%d parse=%s notes=%v\n",
+			result.AppliedReasoning.Source,
+			result.AppliedReasoning.Model,
+			result.AppliedReasoning.Mode,
+			result.AppliedReasoning.Effort,
+			result.AppliedReasoning.BudgetTokens,
+			result.AppliedReasoning.ParseMode,
+			result.AppliedReasoning.Notes,
+		)
+	}
 	fmt.Printf("Tokens: %d in / %d out\n", result.TotalInputTokens, result.TotalOutputTokens)
 	fmt.Printf("Turns: %d\n", result.Turns)
 }
@@ -176,4 +196,52 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildReasoningConfig(parseMode, thinkingMode, thinkingEffort string, thinkingBudget int) (llm.ReasoningConfig, error) {
+	config := llm.ReasoningConfig{}
+
+	switch firstNonEmpty(strings.ToLower(strings.TrimSpace(thinkingMode))) {
+	case "", "inherit":
+	case "on":
+		config.Mode = llm.ThinkingModeOn
+	case "off":
+		config.Mode = llm.ThinkingModeOff
+	case "auto":
+		config.Mode = llm.ThinkingModeAuto
+	default:
+		return llm.ReasoningConfig{}, fmt.Errorf("unknown thinking mode %q (use on, off, auto)", thinkingMode)
+	}
+
+	switch firstNonEmpty(strings.ToLower(strings.TrimSpace(thinkingEffort))) {
+	case "", "inherit":
+	case "low":
+		config.Effort = llm.ThinkingEffortLow
+	case "medium":
+		config.Effort = llm.ThinkingEffortMedium
+	case "high":
+		config.Effort = llm.ThinkingEffortHigh
+	case "max":
+		config.Effort = llm.ThinkingEffortMax
+	default:
+		return llm.ReasoningConfig{}, fmt.Errorf("unknown thinking effort %q (use low, medium, high, max)", thinkingEffort)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(parseMode)) {
+	case "", "auto":
+	case "none":
+		config.ParseMode = llm.ReasoningParseModeNone
+	case "think", "think-tag", "think_tag":
+		config.ParseMode = llm.ReasoningParseModeThinkTag
+	case "native":
+		config.ParseMode = llm.ReasoningParseModeNative
+	default:
+		return llm.ReasoningConfig{}, fmt.Errorf("unknown reasoning mode %q (use auto, none, think-tag, native)", parseMode)
+	}
+
+	if thinkingBudget < 0 {
+		return llm.ReasoningConfig{}, fmt.Errorf("thinking-budget must be >= 0")
+	}
+	config.BudgetTokens = thinkingBudget
+	return config.Normalize(), nil
 }

@@ -123,6 +123,7 @@ func TestTracerFinalizeSnapshot(t *testing.T) {
 	result := &Result{
 		Text:              "final answer",
 		ReasoningText:     "reasoning",
+		AppliedReasoning:  &llm.AppliedReasoning{Provider: "claude", Source: "provider_default", ParseMode: llm.ReasoningParseModeNative},
 		TotalInputTokens:  100,
 		TotalOutputTokens: 50,
 		Turns:             3,
@@ -137,6 +138,9 @@ func TestTracerFinalizeSnapshot(t *testing.T) {
 	}
 	if tracer.trace.Result.ReasoningText != "reasoning" {
 		t.Fatalf("expected reasoning text, got %q", tracer.trace.Result.ReasoningText)
+	}
+	if tracer.trace.Result.AppliedReasoning == nil || tracer.trace.Result.AppliedReasoning.Provider != "claude" {
+		t.Fatalf("expected applied reasoning snapshot, got %#v", tracer.trace.Result.AppliedReasoning)
 	}
 	if tracer.trace.Result.TotalInputTokens != 100 {
 		t.Fatalf("expected 100 input tokens, got %d", tracer.trace.Result.TotalInputTokens)

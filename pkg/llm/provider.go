@@ -83,13 +83,14 @@ func NewToolResultMessage(results []ToolResult) Message {
 
 // Response is the unified LLM response.
 type Response struct {
-	StopReason    StopReason        `json:"stop_reason"`
-	Text          string            `json:"text"`
-	ReasoningText string            `json:"reasoning_text,omitempty"`
-	ToolCalls     []schema.ToolCall `json:"tool_calls,omitempty"`
-	InputTokens   int               `json:"input_tokens"`
-	OutputTokens  int               `json:"output_tokens"`
-	Raw           interface{}       `json:"-"`
+	StopReason       StopReason        `json:"stop_reason"`
+	Text             string            `json:"text"`
+	ReasoningText    string            `json:"reasoning_text,omitempty"`
+	AppliedReasoning *AppliedReasoning `json:"applied_reasoning,omitempty"`
+	ToolCalls        []schema.ToolCall `json:"tool_calls,omitempty"`
+	InputTokens      int               `json:"input_tokens"`
+	OutputTokens     int               `json:"output_tokens"`
+	Raw              interface{}       `json:"-"`
 }
 
 // TotalTokens returns the sum of input and output tokens.
@@ -99,9 +100,10 @@ func (r *Response) TotalTokens() int {
 
 // ChatParams holds all per-request parameters for a Chat call.
 type ChatParams struct {
-	System   string                  `json:"system,omitempty"`
-	Messages []Message               `json:"messages"`
-	Tools    []schema.ToolDefinition `json:"tools,omitempty"`
+	System    string                  `json:"system,omitempty"`
+	Messages  []Message               `json:"messages"`
+	Tools     []schema.ToolDefinition `json:"tools,omitempty"`
+	Reasoning *ReasoningConfig        `json:"reasoning,omitempty"`
 }
 
 // Provider is the unified interface for LLM providers.

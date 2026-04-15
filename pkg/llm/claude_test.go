@@ -82,6 +82,31 @@ func TestConvertToolsToSDK(t *testing.T) {
 	}
 }
 
+func TestConvertResponseFromSDKNativeThinking(t *testing.T) {
+	msg := &anthropic.Message{
+		StopReason: "end_turn",
+		Usage: anthropic.Usage{
+			InputTokens:  12,
+			OutputTokens: 6,
+		},
+		Content: []anthropic.ContentBlockUnion{
+			{Type: "thinking", Thinking: "hidden"},
+			{Type: "text", Text: "visible"},
+		},
+	}
+
+	resp := convertResponseFromSDK(msg, ReasoningParseModeNative)
+	if resp.Text != "visible" {
+		t.Fatalf("expected visible text, got %q", resp.Text)
+	}
+	if resp.ReasoningText != "hidden" {
+		t.Fatalf("expected native thinking text, got %q", resp.ReasoningText)
+	}
+	if resp.InputTokens != 12 || resp.OutputTokens != 6 {
+		t.Fatalf("unexpected token usage: %d/%d", resp.InputTokens, resp.OutputTokens)
+	}
+}
+
 func TestNewTextMessage(t *testing.T) {
 	msg := NewTextMessage(RoleUser, "hello")
 	if msg.Role != RoleUser {

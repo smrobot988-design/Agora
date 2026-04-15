@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	_ "github.com/smrobot988-design/Agora/pkg/config"
@@ -27,7 +28,7 @@ import (
 )
 
 func main() {
-	provider := newProvider()
+	provider, reasoningConfig := newProvider()
 	fmt.Printf("Provider: %s\n", provider.Name())
 
 	// RetryProvider：指数退避重试
@@ -57,6 +58,7 @@ func main() {
 		registry,
 		core.WithMaxTurns(10),
 		core.WithLoopDetector(),
+		core.WithReasoningConfig(reasoningConfig),
 		core.WithTracer(&jsonExporter{}),
 		core.WithSummarizer(),
 	)
@@ -101,12 +103,21 @@ func mustRegister(r *tool.Registry, t tool.Tool) {
 	}
 }
 
-func newProvider() llm.Provider {
+func newProvider() (llm.Provider, llm.ReasoningConfig) {
 	providerFlag := flag.String("provider", "claude", "Provider: claude, minimax, deepseek, doubao, kimi, glm, gpt")
 	apiKey := flag.String("api-key", "", "API key")
 	baseURL := flag.String("base-url", "", "Base URL")
 	model := flag.String("model", "", "Model name (currently claude only; can also use ANTHROPIC_MODEL)")
+	reasoningMode := flag.String("reasoning-mode", "auto", "Reasoning parsing mode: auto, none, think-tag, native")
+	thinkingMode := flag.String("thinking-mode", "", "Provider thinking mode override: on, off, auto")
+	thinkingEffort := flag.String("thinking-effort", "", "Provider thinking effort override: low, medium, high, max")
+	thinkingBudget := flag.Int("thinking-budget", 0, "Provider thinking budget tokens (if supported)")
 	flag.Parse()
+
+	reasoningConfig, err := buildReasoningConfig(*reasoningMode, *thinkingMode, *thinkingEffort, *thinkingBudget)
+	if err != nil {
+		log.Fatalf("reasoning config: %v", err)
+	}
 
 	switch *providerFlag {
 	case "minimax":
@@ -117,7 +128,7 @@ func newProvider() llm.Provider {
 		if *baseURL != "" {
 			opts = append(opts, llm.MiniMaxWithBaseURL(*baseURL))
 		}
-		return llm.NewMiniMaxProvider(opts...)
+		return llm.NewMiniMaxProvider(opts...), reasoningConfig
 
 	case "claude":
 		opts := []llm.ClaudeOption{}
@@ -130,7 +141,7 @@ func newProvider() llm.Provider {
 		if name := firstNonEmpty(*model, os.Getenv("ANTHROPIC_MODEL")); name != "" {
 			opts = append(opts, llm.WithModelName(name))
 		}
-		return llm.NewClaudeProvider(opts...)
+		return llm.NewClaudeProvider(opts...), reasoningConfig
 
 	case "deepseek":
 		opts := []llm.DeepseekOption{}
@@ -140,7 +151,7 @@ func newProvider() llm.Provider {
 		if *baseURL != "" {
 			opts = append(opts, llm.DeepseekWithBaseURL(*baseURL))
 		}
-		return llm.NewDeepseekProvider(opts...)
+		return llm.NewDeepseekProvider(opts...), reasoningConfig
 
 	case "doubao":
 		opts := []llm.DoubaoOption{}
@@ -153,7 +164,7 @@ func newProvider() llm.Provider {
 		if *baseURL != "" {
 			opts = append(opts, llm.DoubaoWithBaseURL(*baseURL))
 		}
-		return llm.NewDoubaoProvider(opts...)
+		return llm.NewDoubaoProvider(opts...), reasoningConfig
 
 	case "kimi":
 		opts := []llm.KimiOption{}
@@ -163,7 +174,7 @@ func newProvider() llm.Provider {
 		if *baseURL != "" {
 			opts = append(opts, llm.KimiWithBaseURL(*baseURL))
 		}
-		return llm.NewKimiProvider(opts...)
+		return llm.NewKimiProvider(opts...), reasoningConfig
 
 	case "glm":
 		opts := []llm.GLMOption{}
@@ -173,7 +184,7 @@ func newProvider() llm.Provider {
 		if *baseURL != "" {
 			opts = append(opts, llm.GLMWithBaseURL(*baseURL))
 		}
-		return llm.NewGLMProvider(opts...)
+		return llm.NewGLMProvider(opts...), reasoningConfig
 
 	case "gpt":
 		opts := []llm.GPTOption{}
@@ -183,11 +194,11 @@ func newProvider() llm.Provider {
 		if *baseURL != "" {
 			opts = append(opts, llm.GPTWithBaseURL(*baseURL))
 		}
-		return llm.NewGPTProvider(opts...)
+		return llm.NewGPTProvider(opts...), reasoningConfig
 
 	default:
 		log.Fatalf("unknown provider %q (use claude, minimax, deepseek, doubao, kimi, glm, gpt)", *providerFlag)
-		return nil
+		return nil, llm.ReasoningConfig{}
 	}
 }
 
@@ -198,4 +209,52 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildReasoningConfig(parseMode, thinkingMode, thinkingEffort string, thinkingBudget int) (llm.ReasoningConfig, error) {
+	config := llm.ReasoningConfig{}
+
+	switch strings.ToLower(strings.TrimSpace(thinkingMode)) {
+	case "", "inherit":
+	case "on":
+		config.Mode = llm.ThinkingModeOn
+	case "off":
+		config.Mode = llm.ThinkingModeOff
+	case "auto":
+		config.Mode = llm.ThinkingModeAuto
+	default:
+		return llm.ReasoningConfig{}, fmt.Errorf("unknown thinking mode %q (use on, off, auto)", thinkingMode)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(thinkingEffort)) {
+	case "", "inherit":
+	case "low":
+		config.Effort = llm.ThinkingEffortLow
+	case "medium":
+		config.Effort = llm.ThinkingEffortMedium
+	case "high":
+		config.Effort = llm.ThinkingEffortHigh
+	case "max":
+		config.Effort = llm.ThinkingEffortMax
+	default:
+		return llm.ReasoningConfig{}, fmt.Errorf("unknown thinking effort %q (use low, medium, high, max)", thinkingEffort)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(parseMode)) {
+	case "", "auto":
+	case "none":
+		config.ParseMode = llm.ReasoningParseModeNone
+	case "think", "think-tag", "think_tag":
+		config.ParseMode = llm.ReasoningParseModeThinkTag
+	case "native":
+		config.ParseMode = llm.ReasoningParseModeNative
+	default:
+		return llm.ReasoningConfig{}, fmt.Errorf("unknown reasoning mode %q (use auto, none, think-tag, native)", parseMode)
+	}
+
+	if thinkingBudget < 0 {
+		return llm.ReasoningConfig{}, fmt.Errorf("thinking-budget must be >= 0")
+	}
+	config.BudgetTokens = thinkingBudget
+	return config.Normalize(), nil
 }

@@ -12,11 +12,13 @@ import (
 
 // mockProvider returns predefined responses in sequence.
 type mockProvider struct {
-	responses []*llm.Response
-	callIndex int
+	responses  []*llm.Response
+	callIndex  int
+	lastParams llm.ChatParams
 }
 
 func (m *mockProvider) Chat(ctx context.Context, params llm.ChatParams) (*llm.Response, error) {
+	m.lastParams = params
 	if m.callIndex >= len(m.responses) {
 		return nil, fmt.Errorf("no more mock responses")
 	}
@@ -273,6 +275,13 @@ func TestRunMultipleToolCalls(t *testing.T) {
 
 func TestRunStreamingReasoningResult(t *testing.T) {
 	provider := &streamMockProvider{events: []*llm.PartialResponse{
+		{Type: llm.StreamEventReasoningApplied, AppliedReasoning: &llm.AppliedReasoning{
+			Provider:  "claude",
+			Source:    "request",
+			Model:     "claude-sonnet-4-6",
+			Mode:      llm.ThinkingModeOn,
+			ParseMode: llm.ReasoningParseModeNative,
+		}},
 		{Type: llm.StreamEventReasoningDelta, ReasoningDelta: "thinking"},
 		{Type: llm.StreamEventTextDelta, TextDelta: "final"},
 		{Type: llm.StreamEventUsage, InputTokens: 10, OutputTokens: 5},
@@ -298,10 +307,13 @@ func TestRunStreamingReasoningResult(t *testing.T) {
 	if result.ReasoningText != "thinking" {
 		t.Fatalf("expected reasoning text, got %q", result.ReasoningText)
 	}
+	if result.AppliedReasoning == nil || result.AppliedReasoning.Provider != "claude" {
+		t.Fatalf("expected applied reasoning to propagate, got %#v", result.AppliedReasoning)
+	}
 	if result.TotalInputTokens != 10 || result.TotalOutputTokens != 5 {
 		t.Fatalf("unexpected token totals: %d in / %d out", result.TotalInputTokens, result.TotalOutputTokens)
 	}
-	if len(eventTypes) < 2 || eventTypes[0] != llm.StreamEventReasoningDelta || eventTypes[1] != llm.StreamEventTextDelta {
+	if len(eventTypes) < 3 || eventTypes[0] != llm.StreamEventReasoningApplied || eventTypes[1] != llm.StreamEventReasoningDelta || eventTypes[2] != llm.StreamEventTextDelta {
 		t.Fatalf("unexpected event types: %v", eventTypes)
 	}
 
@@ -314,6 +326,37 @@ func TestRunStreamingReasoningResult(t *testing.T) {
 	}
 	if got := msgs[1].Content[0].Text; got != "final" {
 		t.Fatalf("expected memory to store final text only, got %q", got)
+	}
+}
+
+func TestAgentPassesReasoningConfig(t *testing.T) {
+	provider := &mockProvider{responses: []*llm.Response{
+		{StopReason: llm.StopReasonEndTurn, Text: "ok"},
+	}}
+	mem := NewMemory()
+	registry := tool.NewRegistry()
+	cfg := llm.ReasoningConfig{
+		Mode:      llm.ThinkingModeOn,
+		Effort:    llm.ThinkingEffortHigh,
+		ParseMode: llm.ReasoningParseModeNative,
+	}
+
+	agent := NewAgent(provider, mem, registry, WithReasoningConfig(cfg))
+	if _, err := agent.Run(context.Background(), "Hi"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if provider.lastParams.Reasoning == nil {
+		t.Fatal("expected reasoning config to be forwarded")
+	}
+	if provider.lastParams.Reasoning.Mode != llm.ThinkingModeOn {
+		t.Fatalf("expected mode on, got %s", provider.lastParams.Reasoning.Mode)
+	}
+	if provider.lastParams.Reasoning.Effort != llm.ThinkingEffortHigh {
+		t.Fatalf("expected effort high, got %s", provider.lastParams.Reasoning.Effort)
+	}
+	if provider.lastParams.Reasoning.ParseMode != llm.ReasoningParseModeNative {
+		t.Fatalf("expected parse mode native, got %s", provider.lastParams.Reasoning.ParseMode)
 	}
 }
 

@@ -108,9 +108,10 @@ func (a *Agent) callLLM(ctx context.Context, tc *TurnContext) *TurnContext {
 	}
 
 	params := llm.ChatParams{
-		System:   a.memory.SystemPrompt(),
-		Messages: tc.messages,
-		Tools:    a.registry.Definitions(),
+		System:    a.memory.SystemPrompt(),
+		Messages:  tc.messages,
+		Tools:     a.registry.Definitions(),
+		Reasoning: a.reasoningConfig,
 	}
 
 	var resp *llm.Response
@@ -208,6 +209,7 @@ func (a *Agent) route(tc *TurnContext) *TurnContext {
 	case ActionFinal:
 		tc.result.Text = decision.Text
 		tc.result.ReasoningText = tc.response.ReasoningText
+		tc.result.AppliedReasoning = tc.response.AppliedReasoning
 		tc.isDone = true
 
 	case ActionToolCall:
@@ -317,12 +319,13 @@ func (a *Agent) executeTools(ctx context.Context, tc *TurnContext) *TurnContext 
 
 // streamAccumulator collects streaming events into a complete *llm.Response.
 type streamAccumulator struct {
-	text          string
-	reasoningText string
-	toolCalls     map[int]*accumulatedToolCall
-	inputTokens   int
-	outputTokens  int
-	stopReason    llm.StopReason
+	text             string
+	reasoningText    string
+	appliedReasoning *llm.AppliedReasoning
+	toolCalls        map[int]*accumulatedToolCall
+	inputTokens      int
+	outputTokens     int
+	stopReason       llm.StopReason
 }
 
 type accumulatedToolCall struct {
@@ -344,6 +347,8 @@ func (acc *streamAccumulator) onEvent(event *llm.PartialResponse) {
 		acc.text += event.TextDelta
 	case llm.StreamEventReasoningDelta:
 		acc.reasoningText += event.ReasoningDelta
+	case llm.StreamEventReasoningApplied:
+		acc.appliedReasoning = event.AppliedReasoning
 	case llm.StreamEventToolDelta:
 		if event.ToolCallDelta == nil {
 			break
@@ -382,11 +387,12 @@ func (acc *streamAccumulator) toResponse() *llm.Response {
 		}
 	}
 	return &llm.Response{
-		StopReason:    acc.stopReason,
-		Text:          acc.text,
-		ReasoningText: acc.reasoningText,
-		ToolCalls:     sorted,
-		InputTokens:   acc.inputTokens,
-		OutputTokens:  acc.outputTokens,
+		StopReason:       acc.stopReason,
+		Text:             acc.text,
+		ReasoningText:    acc.reasoningText,
+		AppliedReasoning: acc.appliedReasoning,
+		ToolCalls:        sorted,
+		InputTokens:      acc.inputTokens,
+		OutputTokens:     acc.outputTokens,
 	}
 }

@@ -23,18 +23,18 @@ type OpenAICompatProvider struct {
 	model         string
 	maxTokens     int
 	name          string
-	reasoningMode ReasoningMode
+	reasoningMode ReasoningParseMode
 }
 
 // OpenAICompatConfig holds the construction parameters for OpenAICompatProvider.
 type OpenAICompatConfig struct {
-	Name          string        // Provider name for logging/tracing (e.g. "deepseek")
-	BaseURL       string        // API endpoint base URL
-	APIKey        string        // API key (takes precedence over EnvKey)
-	EnvKey        string        // Environment variable name to read API key from
-	Model         string        // Default model name
-	MaxTokens     int           // Default max completion tokens
-	ReasoningMode ReasoningMode // Content classification mode for reasoning output
+	Name          string             // Provider name for logging/tracing (e.g. "deepseek")
+	BaseURL       string             // API endpoint base URL
+	APIKey        string             // API key (takes precedence over EnvKey)
+	EnvKey        string             // Environment variable name to read API key from
+	Model         string             // Default model name
+	MaxTokens     int                // Default max completion tokens
+	ReasoningMode ReasoningParseMode // Content classification mode for reasoning output
 }
 
 // NewOpenAICompatProvider creates a generic OpenAI-compatible provider.
@@ -73,12 +73,7 @@ func (p *OpenAICompatProvider) EstimateTokens(messages []Message) int {
 
 // Chat implements Provider.Chat using the OpenAI chat completions API.
 func (p *OpenAICompatProvider) Chat(ctx context.Context, chatParams ChatParams) (*Response, error) {
-	req := openai.ChatCompletionRequest{
-		Model:               p.model,
-		MaxCompletionTokens: p.maxTokens,
-		Messages:            convertMessagesToGoOpenAI(chatParams.Messages),
-		Stream:              false,
-	}
+	req, resolution := p.buildChatCompletionRequest(chatParams, false)
 	if len(chatParams.Tools) > 0 {
 		req.Tools = convertToolsToGoOpenAI(chatParams.Tools)
 	}
@@ -92,17 +87,14 @@ func (p *OpenAICompatProvider) Chat(ctx context.Context, chatParams ChatParams) 
 	if err != nil {
 		return nil, fmt.Errorf("%s chat: %w", p.name, err)
 	}
-	return convertResponseFromGoOpenAI(resp, p.reasoningMode), nil
+	converted := convertResponseFromGoOpenAI(resp, resolution.parseMode)
+	converted.AppliedReasoning = resolution.applied
+	return converted, nil
 }
 
 // ChatStream implements Provider.ChatStream using OpenAI-compatible streaming.
 func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatParams, cb func(*PartialResponse)) error {
-	req := openai.ChatCompletionRequest{
-		Model:               p.model,
-		MaxCompletionTokens: p.maxTokens,
-		Messages:            convertMessagesToGoOpenAI(chatParams.Messages),
-		Stream:              true,
-	}
+	req, resolution := p.buildChatCompletionRequest(chatParams, true)
 	if len(chatParams.Tools) > 0 {
 		req.Tools = convertToolsToGoOpenAI(chatParams.Tools)
 	}
@@ -118,7 +110,13 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatPa
 	}
 	defer stream.Close()
 
-	parser := newReasoningParser(p.reasoningMode)
+	parser := newReasoningParser(resolution.parseMode)
+	if resolution.applied != nil {
+		cb(&PartialResponse{
+			Type:             StreamEventReasoningApplied,
+			AppliedReasoning: resolution.applied,
+		})
+	}
 
 	for {
 		chunk, err := stream.Recv()
@@ -132,6 +130,12 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatPa
 		}
 
 		for _, choice := range chunk.Choices {
+			if resolution.parseMode == ReasoningParseModeNative && choice.Delta.ReasoningContent != "" {
+				cb(&PartialResponse{
+					Type:           StreamEventReasoningDelta,
+					ReasoningDelta: choice.Delta.ReasoningContent,
+				})
+			}
 			if choice.Delta.Content != "" {
 				emitClassifiedSegments(cb, parser.Consume(choice.Delta.Content))
 			}
@@ -171,6 +175,20 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatPa
 			}
 		}
 	}
+}
+
+func (p *OpenAICompatProvider) buildChatCompletionRequest(chatParams ChatParams, stream bool) (openai.ChatCompletionRequest, openAIReasoningResolution) {
+	resolution := resolveOpenAICompatReasoning(p.name, p.model, p.reasoningMode, chatParams.Reasoning)
+	req := openai.ChatCompletionRequest{
+		Model:               resolution.model,
+		MaxCompletionTokens: p.maxTokens,
+		Messages:            convertMessagesToGoOpenAI(chatParams.Messages),
+		Stream:              stream,
+	}
+	if resolution.reasoningEffort != "" {
+		req.ReasoningEffort = resolution.reasoningEffort
+	}
+	return req, resolution
 }
 
 // ============================================================================
@@ -271,7 +289,7 @@ func convertToolsToGoOpenAI(tools []schema.ToolDefinition) []openai.Tool {
 	return result
 }
 
-func convertResponseFromGoOpenAI(resp openai.ChatCompletionResponse, mode ReasoningMode) *Response {
+func convertResponseFromGoOpenAI(resp openai.ChatCompletionResponse, mode ReasoningParseMode) *Response {
 	result := &Response{
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
@@ -296,6 +314,9 @@ func convertResponseFromGoOpenAI(resp openai.ChatCompletionResponse, mode Reason
 	}
 
 	result.Text, result.ReasoningText = classifyContent(mode, choice.Message.Content)
+	if mode == ReasoningParseModeNative && choice.Message.ReasoningContent != "" {
+		result.ReasoningText += choice.Message.ReasoningContent
+	}
 
 	for _, tc := range choice.Message.ToolCalls {
 		var input map[string]interface{}

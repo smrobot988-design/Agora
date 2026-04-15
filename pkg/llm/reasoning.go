@@ -4,11 +4,25 @@ import "strings"
 
 // ReasoningMode controls how provider output is classified into
 // user-visible text vs. reasoning content.
+//
+// Deprecated: prefer using ReasoningParseMode in new APIs. ReasoningMode is kept
+// as a backwards-compatible alias for the same concept.
 type ReasoningMode string
 
 const (
 	ReasoningModeNone     ReasoningMode = "none"
 	ReasoningModeThinkTag ReasoningMode = "think_tag"
+	ReasoningModeNative   ReasoningMode = "native"
+)
+
+// ReasoningParseMode is the preferred name for configuring how raw provider
+// output is split into visible text vs. reasoning content.
+type ReasoningParseMode = ReasoningMode
+
+const (
+	ReasoningParseModeNone     = ReasoningModeNone
+	ReasoningParseModeThinkTag = ReasoningModeThinkTag
+	ReasoningParseModeNative   = ReasoningModeNative
 )
 
 type contentKind int

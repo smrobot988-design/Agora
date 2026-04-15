@@ -90,6 +90,7 @@ func (p *ClaudeProvider) Chat(ctx context.Context, chatParams ChatParams) (*Resp
 		return nil, fmt.Errorf("convert messages: %w", err)
 	}
 
+	resolution := resolveClaudeReasoning(p.model, chatParams.Reasoning)
 	params := anthropic.MessageNewParams{
 		Model:     p.model,
 		MaxTokens: p.maxTokens,
@@ -103,6 +104,12 @@ func (p *ClaudeProvider) Chat(ctx context.Context, chatParams ChatParams) (*Resp
 	if len(chatParams.Tools) > 0 {
 		params.Tools = convertToolsToSDK(chatParams.Tools)
 	}
+	if resolution.useThinking {
+		params.Thinking = resolution.thinking
+	}
+	if resolution.useOutput {
+		params.OutputConfig = resolution.output
+	}
 
 	msg, err := p.client.Messages.New(ctx, params)
 	if err != nil {
@@ -113,7 +120,9 @@ func (p *ClaudeProvider) Chat(ctx context.Context, chatParams ChatParams) (*Resp
 		"input_tokens", msg.Usage.InputTokens,
 		"output_tokens", msg.Usage.OutputTokens)
 
-	return convertResponseFromSDK(msg), nil
+	resp := convertResponseFromSDK(msg, resolution.parseMode)
+	resp.AppliedReasoning = resolution.applied
+	return resp, nil
 }
 
 func (p *ClaudeProvider) ChatStream(ctx context.Context, params ChatParams, cb func(*PartialResponse)) error {
@@ -122,6 +131,7 @@ func (p *ClaudeProvider) ChatStream(ctx context.Context, params ChatParams, cb f
 		return fmt.Errorf("convert messages: %w", err)
 	}
 
+	resolution := resolveClaudeReasoning(p.model, params.Reasoning)
 	sdkParams := anthropic.MessageNewParams{
 		Model:     p.model,
 		MaxTokens: p.maxTokens,
@@ -132,6 +142,12 @@ func (p *ClaudeProvider) ChatStream(ctx context.Context, params ChatParams, cb f
 	}
 	if len(params.Tools) > 0 {
 		sdkParams.Tools = convertToolsToSDK(params.Tools)
+	}
+	if resolution.useThinking {
+		sdkParams.Thinking = resolution.thinking
+	}
+	if resolution.useOutput {
+		sdkParams.OutputConfig = resolution.output
 	}
 
 	stream := p.client.Messages.NewStreaming(ctx, sdkParams)
@@ -144,6 +160,13 @@ func (p *ClaudeProvider) ChatStream(ctx context.Context, params ChatParams, cb f
 		args  string
 	}
 	var toolCallAcc *accumulator
+
+	if resolution.applied != nil {
+		cb(&PartialResponse{
+			Type:             StreamEventReasoningApplied,
+			AppliedReasoning: resolution.applied,
+		})
+	}
 
 	for stream.Next() {
 		event := stream.Current()
@@ -170,14 +193,21 @@ func (p *ClaudeProvider) ChatStream(ctx context.Context, params ChatParams, cb f
 						TextDelta: delta.Text,
 					})
 				}
+			case "thinking_delta":
+				if resolution.parseMode == ReasoningParseModeNative && delta.Thinking != "" {
+					cb(&PartialResponse{
+						Type:           StreamEventReasoningDelta,
+						ReasoningDelta: delta.Thinking,
+					})
+				}
 			case "input_json_delta":
 				if delta.PartialJSON != "" && toolCallAcc != nil {
 					toolCallAcc.args += delta.PartialJSON
 					cb(&PartialResponse{
 						Type: StreamEventToolDelta,
 						ToolCallDelta: &ToolCallDelta{
-							Index:           toolCallAcc.index,
-							ArgumentsDelta:   delta.PartialJSON,
+							Index:          toolCallAcc.index,
+							ArgumentsDelta: delta.PartialJSON,
 						},
 					})
 				}
@@ -189,9 +219,9 @@ func (p *ClaudeProvider) ChatStream(ctx context.Context, params ChatParams, cb f
 				cb(&PartialResponse{
 					Type: StreamEventToolDelta,
 					ToolCallDelta: &ToolCallDelta{
-						Index:    toolCallAcc.index,
-						ID:       toolCallAcc.id,
-						Name:     toolCallAcc.name,
+						Index: toolCallAcc.index,
+						ID:    toolCallAcc.id,
+						Name:  toolCallAcc.name,
 					},
 				})
 				toolCallAcc = nil
@@ -289,7 +319,7 @@ func convertToolsToSDK(tools []schema.ToolDefinition) []anthropic.ToolUnionParam
 }
 
 // convertResponseFromSDK extracts our Response from an SDK Message.
-func convertResponseFromSDK(msg *anthropic.Message) *Response {
+func convertResponseFromSDK(msg *anthropic.Message, parseMode ReasoningParseMode) *Response {
 	resp := &Response{
 		StopReason:   StopReason(msg.StopReason),
 		InputTokens:  int(msg.Usage.InputTokens),
@@ -304,6 +334,10 @@ func convertResponseFromSDK(msg *anthropic.Message) *Response {
 				resp.Text += "\n"
 			}
 			resp.Text += block.Text
+		case "thinking":
+			if parseMode == ReasoningParseModeNative {
+				resp.ReasoningText += block.Thinking
+			}
 		case BlockToolUse:
 			inputMap := make(map[string]interface{})
 			if len(block.Input) > 0 {

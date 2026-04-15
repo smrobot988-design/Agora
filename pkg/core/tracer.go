@@ -84,6 +84,7 @@ func (t *Tracer) FinalizeSnapshot(result *Result) {
 	t.trace.Finalize(&trace.ResultSnapshot{
 		Text:              result.Text,
 		ReasoningText:     result.ReasoningText,
+		AppliedReasoning:  result.AppliedReasoning,
 		TotalInputTokens:  result.TotalInputTokens,
 		TotalOutputTokens: result.TotalOutputTokens,
 		Turns:             result.Turns,

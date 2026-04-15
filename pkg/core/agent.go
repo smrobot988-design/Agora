@@ -16,16 +16,17 @@ const defaultMaxTurns = 10
 // Agent ties together a Provider, Memory, tool Registry, and Router
 // to execute agentic loops.
 type Agent struct {
-	provider       llm.Provider
-	memory         *Memory
-	registry       *tool.Registry
-	router         *Router
-	maxTurns       int
-	tracer         *Tracer
-	loopDetector   *LoopDetector
-	summarizer     *Summarizer
-	streamCallback func(*llm.PartialResponse)
+	provider        llm.Provider
+	memory          *Memory
+	registry        *tool.Registry
+	router          *Router
+	maxTurns        int
+	tracer          *Tracer
+	loopDetector    *LoopDetector
+	summarizer      *Summarizer
+	streamCallback  func(*llm.PartialResponse)
 	lastToolResults []llm.ToolResult
+	reasoningConfig *llm.ReasoningConfig
 }
 
 // AgentOption configures an Agent.
@@ -63,6 +64,15 @@ func WithSummarizer() AgentOption {
 func WithStreamCallback(cb func(*llm.PartialResponse)) AgentOption {
 	return func(a *Agent) {
 		a.streamCallback = cb
+	}
+}
+
+// WithReasoningConfig configures provider-side thinking behavior for every LLM
+// call made by the agent. A zero-value config preserves provider defaults.
+func WithReasoningConfig(cfg llm.ReasoningConfig) AgentOption {
+	return func(a *Agent) {
+		normalized := cfg.Normalize()
+		a.reasoningConfig = &normalized
 	}
 }
 

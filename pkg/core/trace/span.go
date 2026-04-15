@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/smrobot988-design/Agora/pkg/llm"
 )
 
 // SpanKind classifies what a span represents.
@@ -40,11 +42,12 @@ type Span struct {
 
 // ResultSnapshot captures the final result of an agent run.
 type ResultSnapshot struct {
-	Text              string `json:"text"`
-	ReasoningText     string `json:"reasoning_text,omitempty"`
-	TotalInputTokens  int    `json:"total_input_tokens"`
-	TotalOutputTokens int    `json:"total_output_tokens"`
-	Turns             int    `json:"turns"`
+	Text              string                `json:"text"`
+	ReasoningText     string                `json:"reasoning_text,omitempty"`
+	AppliedReasoning  *llm.AppliedReasoning `json:"applied_reasoning,omitempty"`
+	TotalInputTokens  int                   `json:"total_input_tokens"`
+	TotalOutputTokens int                   `json:"total_output_tokens"`
+	Turns             int                   `json:"turns"`
 }
 
 // Trace is the complete record of an agent run.
