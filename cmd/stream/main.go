@@ -29,6 +29,7 @@ var (
 	flagProvider        = flag.String("provider", "minimax", "Provider: claude, minimax, deepseek, doubao, kimi, glm, gpt")
 	flagAPIKey          = flag.String("api-key", "", "API key (or set MINIMAX_API_KEY / ANTHROPIC_API_KEY env var)")
 	flagBaseURL         = flag.String("base-url", "", "Custom API base URL (e.g. for proxy/relay)")
+	flagModel           = flag.String("model", "", "Override model name (currently claude only; can also use ANTHROPIC_MODEL)")
 	flagReasoningMode   = flag.String("reasoning-mode", "auto", "Reasoning parsing mode: auto, none, think-tag")
 	flagShowReasoning   = flag.Bool("show-reasoning", false, "Show reasoning output in real time")
 	flagReasoningOutput = flag.String("reasoning-output", "stderr", "Where to write reasoning output: stderr, stdout, hidden")
@@ -44,7 +45,7 @@ func main() {
 		reasoningOutput: *flagReasoningOutput,
 		debugEvents:     *flagDebugEvents,
 	}
-	provider := newStreamProvider(*flagProvider, *flagAPIKey, *flagBaseURL, *flagReasoningMode)
+	provider := newStreamProvider(*flagProvider, *flagAPIKey, *flagBaseURL, *flagModel, *flagReasoningMode)
 
 	// Register tools
 	registry := tool.NewRegistry()
@@ -285,7 +286,7 @@ func runStreamTask(ctx context.Context, provider StreamProvider, registry *tool.
 func runStreamREPL(ctx context.Context, provider StreamProvider, registry *tool.Registry, display streamDisplayOptions) {
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("Agora Streaming REPL")
-	fmt.Println("Usage: go run ./cmd/stream/ -provider claude|minimax|deepseek|doubao|kimi|glm|gpt [-api-key KEY] [-base-url URL] [-reasoning-mode auto|none|think-tag] [-show-reasoning]")
+	fmt.Println("Usage: go run ./cmd/stream/ -provider claude|minimax|deepseek|doubao|kimi|glm|gpt [-api-key KEY] [-base-url URL] [-model NAME] [-reasoning-mode auto|none|think-tag] [-show-reasoning]")
 	fmt.Println("Tools: read_file, run_command")
 	fmt.Println("Type 'exit' or 'quit' to stop, 'clear' to clear history")
 	fmt.Println()
@@ -405,7 +406,7 @@ func parseJSON(s string) map[string]interface{} {
 }
 
 // newStreamProvider creates a StreamProvider based on command-line flags and env vars.
-func newStreamProvider(providerFlag, apiKey, baseURL, reasoningModeFlag string) StreamProvider {
+func newStreamProvider(providerFlag, apiKey, baseURL, modelName, reasoningModeFlag string) StreamProvider {
 	reasoningMode, reasoningModeSet, err := parseReasoningMode(reasoningModeFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -439,6 +440,9 @@ func newStreamProvider(providerFlag, apiKey, baseURL, reasoningModeFlag string) 
 		opts = append(opts, llm.WithAPIKey(key))
 		if url := firstNonEmpty(baseURL, os.Getenv("ANTHROPIC_BASE_URL")); url != "" {
 			opts = append(opts, llm.WithBaseURL(url))
+		}
+		if model := firstNonEmpty(modelName, os.Getenv("ANTHROPIC_MODEL")); model != "" {
+			opts = append(opts, llm.WithModelName(model))
 		}
 		if reasoningModeSet && reasoningMode != llm.ReasoningModeNone {
 			fmt.Fprintf(os.Stderr, "Warning: reasoning-mode=%s is ignored for provider claude\n", reasoningMode)
