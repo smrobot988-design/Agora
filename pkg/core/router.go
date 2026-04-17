@@ -43,6 +43,37 @@ type ValidatedToolCall struct {
 	Tool tool.Tool
 }
 
+// ToolCallErrorCode classifies structured tool-call failures.
+type ToolCallErrorCode string
+
+const (
+	ToolCallErrorMissingToolCall    ToolCallErrorCode = "missing_tool_call"
+	ToolCallErrorUnknownTool        ToolCallErrorCode = "unknown_tool"
+	ToolCallErrorWrongTool          ToolCallErrorCode = "wrong_tool"
+	ToolCallErrorParallelNotAllowed ToolCallErrorCode = "parallel_tool_calls_not_allowed"
+	ToolCallErrorMalformedArguments ToolCallErrorCode = "malformed_tool_arguments"
+	ToolCallErrorInvalidArguments   ToolCallErrorCode = "invalid_tool_arguments"
+)
+
+// ToolCallError captures a provider-agnostic structured generation failure.
+type ToolCallError struct {
+	Code     ToolCallErrorCode
+	ToolName string
+	Call     *schema.ToolCall
+	Issues   []schema.ValidationIssue
+	Message  string
+}
+
+func (e *ToolCallError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	return string(e.Code)
+}
+
 // Router examines an LLM response and determines the next action.
 type Router struct {
 	registry *tool.Registry
@@ -54,13 +85,30 @@ func NewRouter(registry *tool.Registry) *Router {
 }
 
 // Route inspects the response and returns a Decision.
-func (r *Router) Route(resp *llm.Response) Decision {
+func (r *Router) Route(resp *llm.Response, policy *llm.ToolCallPolicy) Decision {
+	normalizedPolicy := llm.ToolCallPolicy{}
+	if policy != nil {
+		normalizedPolicy = policy.Normalize()
+	} else {
+		normalizedPolicy = normalizedPolicy.Normalize()
+	}
+
 	switch resp.StopReason {
 	case llm.StopReasonEndTurn:
+		if normalizedPolicy.RequiresToolCall() {
+			return Decision{
+				Action: ActionError,
+				Error: &ToolCallError{
+					Code:     ToolCallErrorMissingToolCall,
+					ToolName: normalizedPolicy.ToolName,
+					Message:  "tool call required but model returned final text",
+				},
+			}
+		}
 		return Decision{Action: ActionFinal, Text: resp.Text}
 
 	case llm.StopReasonToolUse:
-		return r.routeToolCalls(resp.ToolCalls)
+		return r.routeToolCalls(resp.ToolCalls, normalizedPolicy)
 
 	case llm.StopReasonMaxTokens:
 		return Decision{
@@ -77,11 +125,36 @@ func (r *Router) Route(resp *llm.Response) Decision {
 }
 
 // routeToolCalls validates each tool call against the registry.
-func (r *Router) routeToolCalls(calls []schema.ToolCall) Decision {
+func (r *Router) routeToolCalls(calls []schema.ToolCall, policy llm.ToolCallPolicy) Decision {
 	if len(calls) == 0 {
 		return Decision{
 			Action: ActionError,
-			Error:  fmt.Errorf("stop_reason is tool_use but no tool calls present"),
+			Error: &ToolCallError{
+				Code:     ToolCallErrorMissingToolCall,
+				ToolName: policy.ToolName,
+				Message:  "stop_reason is tool_use but no tool calls present",
+			},
+		}
+	}
+	if policy.DisableParallel && len(calls) > 1 {
+		return Decision{
+			Action: ActionError,
+			Error: &ToolCallError{
+				Code:    ToolCallErrorParallelNotAllowed,
+				Message: "parallel tool calls are disabled for this request",
+			},
+		}
+	}
+	if policy.Choice == llm.ToolChoiceSpecific {
+		if len(calls) != 1 || calls[0].Name != policy.ToolName {
+			return Decision{
+				Action: ActionError,
+				Error: &ToolCallError{
+					Code:     ToolCallErrorWrongTool,
+					ToolName: policy.ToolName,
+					Message:  fmt.Sprintf("expected tool %q to be called", policy.ToolName),
+				},
+			}
 		}
 	}
 
@@ -91,9 +164,41 @@ func (r *Router) routeToolCalls(calls []schema.ToolCall) Decision {
 		if !ok {
 			return Decision{
 				Action: ActionError,
-				Error:  fmt.Errorf("unknown tool: %q", call.Name),
+				Error: &ToolCallError{
+					Code:     ToolCallErrorUnknownTool,
+					ToolName: call.Name,
+					Call:     &call,
+					Message:  fmt.Sprintf("unknown tool: %q", call.Name),
+				},
 			}
 		}
+		if call.ParseError != "" {
+			return Decision{
+				Action: ActionError,
+				Error: &ToolCallError{
+					Code:     ToolCallErrorMalformedArguments,
+					ToolName: call.Name,
+					Call:     &call,
+					Message:  fmt.Sprintf("tool %q arguments are not valid JSON", call.Name),
+				},
+			}
+		}
+
+		normalizedInput, issues := schema.NormalizeToolInput(t.Definition(), call.Input)
+		if len(issues) > 0 {
+			call.ValidationIssues = issues
+			return Decision{
+				Action: ActionError,
+				Error: &ToolCallError{
+					Code:     ToolCallErrorInvalidArguments,
+					ToolName: call.Name,
+					Call:     &call,
+					Issues:   issues,
+					Message:  fmt.Sprintf("tool %q arguments do not match declared schema", call.Name),
+				},
+			}
+		}
+		call.Input = normalizedInput
 		validated = append(validated, ValidatedToolCall{Call: call, Tool: t})
 	}
 	return Decision{Action: ActionToolCall, ToolCalls: validated}

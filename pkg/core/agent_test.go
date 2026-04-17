@@ -12,13 +12,15 @@ import (
 
 // mockProvider returns predefined responses in sequence.
 type mockProvider struct {
-	responses  []*llm.Response
-	callIndex  int
-	lastParams llm.ChatParams
+	responses     []*llm.Response
+	callIndex     int
+	lastParams    llm.ChatParams
+	paramsHistory []llm.ChatParams
 }
 
 func (m *mockProvider) Chat(ctx context.Context, params llm.ChatParams) (*llm.Response, error) {
 	m.lastParams = params
+	m.paramsHistory = append(m.paramsHistory, params)
 	if m.callIndex >= len(m.responses) {
 		return nil, fmt.Errorf("no more mock responses")
 	}
@@ -357,6 +359,124 @@ func TestAgentPassesReasoningConfig(t *testing.T) {
 	}
 	if provider.lastParams.Reasoning.ParseMode != llm.ReasoningParseModeNative {
 		t.Fatalf("expected parse mode native, got %s", provider.lastParams.Reasoning.ParseMode)
+	}
+}
+
+func TestAgentRepairsInvalidToolArguments(t *testing.T) {
+	provider := &mockProvider{responses: []*llm.Response{
+		{
+			StopReason: llm.StopReasonToolUse,
+			ToolCalls: []schema.ToolCall{
+				{ID: "bad_1", Name: "echo", Input: map[string]interface{}{}},
+			},
+		},
+		{
+			StopReason: llm.StopReasonToolUse,
+			ToolCalls: []schema.ToolCall{
+				{ID: "good_1", Name: "echo", Input: map[string]interface{}{"message": "world"}},
+			},
+		},
+		{
+			StopReason: llm.StopReasonEndTurn,
+			Text:       "done",
+		},
+	}}
+	registry := tool.NewRegistry()
+	_ = registry.Register(&tool.Func{
+		Def: schema.ToolDefinition{
+			Name:        "echo",
+			Description: "Echo the message",
+			InputSchema: schema.PropertySchema{
+				Properties: map[string]interface{}{
+					"message": map[string]interface{}{"type": "string"},
+				},
+				Required: []string{"message"},
+			},
+		},
+		Handler: func(ctx context.Context, input map[string]interface{}) (string, error) {
+			msg, _ := input["message"].(string)
+			return msg, nil
+		},
+	})
+	mem := NewMemory(WithSystemPrompt("test system prompt"))
+	agent := NewAgent(provider, mem, registry)
+
+	result, err := agent.Run(context.Background(), "Echo world")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Text != "done" {
+		t.Fatalf("expected final text done, got %q", result.Text)
+	}
+	if provider.callIndex != 3 {
+		t.Fatalf("expected 3 provider calls (invalid + repair + final), got %d", provider.callIndex)
+	}
+	if len(provider.paramsHistory) < 2 || provider.paramsHistory[1].ToolPolicy == nil {
+		t.Fatalf("expected repair call to include tool policy, got %#v", provider.paramsHistory)
+	}
+	if provider.paramsHistory[1].ToolPolicy.Choice != llm.ToolChoiceSpecific {
+		t.Fatalf("expected repair policy to force specific tool, got %#v", provider.paramsHistory[1].ToolPolicy)
+	}
+
+	msgs, err := mem.AllMessages()
+	if err != nil {
+		t.Fatalf("unexpected memory error: %v", err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("expected user, assistant(tool_use), tool(result), assistant(final); got %d", len(msgs))
+	}
+	if msgs[1].Content[0].ToolCall.ID != "good_1" {
+		t.Fatalf("expected repaired tool call to be stored, got %#v", msgs[1].Content[0].ToolCall)
+	}
+}
+
+func TestAgentRepairsMissingRequiredToolCall(t *testing.T) {
+	provider := &mockProvider{responses: []*llm.Response{
+		{StopReason: llm.StopReasonEndTurn, Text: "I think the answer is world"},
+		{
+			StopReason: llm.StopReasonToolUse,
+			ToolCalls: []schema.ToolCall{
+				{ID: "tool_1", Name: "echo", Input: map[string]interface{}{"message": "world"}},
+			},
+		},
+		{StopReason: llm.StopReasonEndTurn, Text: "done"},
+	}}
+	registry := tool.NewRegistry()
+	_ = registry.Register(&tool.Func{
+		Def: schema.ToolDefinition{
+			Name:        "echo",
+			Description: "Echo the message",
+			InputSchema: schema.PropertySchema{
+				Properties: map[string]interface{}{
+					"message": map[string]interface{}{"type": "string"},
+				},
+				Required: []string{"message"},
+			},
+		},
+		Handler: func(ctx context.Context, input map[string]interface{}) (string, error) {
+			msg, _ := input["message"].(string)
+			return msg, nil
+		},
+	})
+	mem := NewMemory()
+	agent := NewAgent(provider, mem, registry, WithToolCallPolicy(llm.ToolCallPolicy{
+		Choice:            llm.ToolChoiceSpecific,
+		ToolName:          "echo",
+		MaxRepairAttempts: 1,
+	}))
+
+	result, err := agent.Run(context.Background(), "Echo world")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Text != "done" {
+		t.Fatalf("expected done, got %q", result.Text)
+	}
+	if len(provider.paramsHistory) < 2 || provider.paramsHistory[1].ToolPolicy == nil {
+		t.Fatalf("expected repair call tool policy, got %#v", provider.paramsHistory)
+	}
+	if provider.paramsHistory[1].ToolPolicy.ToolName != "echo" {
+		t.Fatalf("expected repair to force echo tool, got %#v", provider.paramsHistory[1].ToolPolicy)
 	}
 }
 

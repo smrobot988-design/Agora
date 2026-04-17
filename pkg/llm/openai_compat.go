@@ -75,7 +75,8 @@ func (p *OpenAICompatProvider) EstimateTokens(messages []Message) int {
 func (p *OpenAICompatProvider) Chat(ctx context.Context, chatParams ChatParams) (*Response, error) {
 	req, resolution := p.buildChatCompletionRequest(chatParams, false)
 	if len(chatParams.Tools) > 0 {
-		req.Tools = convertToolsToGoOpenAI(chatParams.Tools)
+		req.Tools = convertToolsToGoOpenAI(chatParams.Tools, normalizeToolCallPolicy(chatParams.ToolPolicy).StrictSchema)
+		applyOpenAIToolPolicy(&req, chatParams.ToolPolicy)
 	}
 	if chatParams.System != "" {
 		req.Messages = append([]openai.ChatCompletionMessage{
@@ -96,7 +97,8 @@ func (p *OpenAICompatProvider) Chat(ctx context.Context, chatParams ChatParams) 
 func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatParams, cb func(*PartialResponse)) error {
 	req, resolution := p.buildChatCompletionRequest(chatParams, true)
 	if len(chatParams.Tools) > 0 {
-		req.Tools = convertToolsToGoOpenAI(chatParams.Tools)
+		req.Tools = convertToolsToGoOpenAI(chatParams.Tools, normalizeToolCallPolicy(chatParams.ToolPolicy).StrictSchema)
+		applyOpenAIToolPolicy(&req, chatParams.ToolPolicy)
 	}
 	if chatParams.System != "" {
 		req.Messages = append([]openai.ChatCompletionMessage{
@@ -142,7 +144,11 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatPa
 
 			if len(choice.Delta.ToolCalls) > 0 {
 				for _, tc := range choice.Delta.ToolCalls {
-					delta := &ToolCallDelta{Index: choice.Index}
+					index := choice.Index
+					if tc.Index != nil {
+						index = *tc.Index
+					}
+					delta := &ToolCallDelta{Index: index}
 					if tc.ID != "" {
 						delta.ID = tc.ID
 					}
@@ -267,7 +273,7 @@ func convertMessagesToGoOpenAI(messages []Message) []openai.ChatCompletionMessag
 	return result
 }
 
-func convertToolsToGoOpenAI(tools []schema.ToolDefinition) []openai.Tool {
+func convertToolsToGoOpenAI(tools []schema.ToolDefinition, strict bool) []openai.Tool {
 	result := make([]openai.Tool, len(tools))
 	for i, t := range tools {
 		params := map[string]interface{}{
@@ -282,6 +288,7 @@ func convertToolsToGoOpenAI(tools []schema.ToolDefinition) []openai.Tool {
 			Function: &openai.FunctionDefinition{
 				Name:        t.Name,
 				Description: t.Description,
+				Strict:      strict,
 				Parameters:  params,
 			},
 		}
@@ -319,16 +326,30 @@ func convertResponseFromGoOpenAI(resp openai.ChatCompletionResponse, mode Reason
 	}
 
 	for _, tc := range choice.Message.ToolCalls {
-		var input map[string]interface{}
-		json.Unmarshal([]byte(tc.Function.Arguments), &input)
-		result.ToolCalls = append(result.ToolCalls, schema.ToolCall{
-			ID:    tc.ID,
-			Name:  tc.Function.Name,
-			Input: input,
-		})
+		result.ToolCalls = append(result.ToolCalls, newToolCall(tc.ID, tc.Function.Name, tc.Function.Arguments))
 	}
 
 	return result
+}
+
+func applyOpenAIToolPolicy(req *openai.ChatCompletionRequest, policy *ToolCallPolicy) {
+	normalized := normalizeToolCallPolicy(policy)
+	switch normalized.Choice {
+	case ToolChoiceRequired:
+		req.ToolChoice = "required"
+	case ToolChoiceSpecific:
+		req.ToolChoice = openai.ToolChoice{
+			Type: openai.ToolTypeFunction,
+			Function: openai.ToolFunction{
+				Name: normalized.ToolName,
+			},
+		}
+	case ToolChoiceNone:
+		req.ToolChoice = "none"
+	}
+	if normalized.DisableParallel {
+		req.ParallelToolCalls = false
+	}
 }
 
 func emitClassifiedSegments(cb func(*PartialResponse), segments []contentSegment) {

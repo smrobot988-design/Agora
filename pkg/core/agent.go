@@ -27,6 +27,7 @@ type Agent struct {
 	streamCallback  func(*llm.PartialResponse)
 	lastToolResults []llm.ToolResult
 	reasoningConfig *llm.ReasoningConfig
+	toolCallPolicy  *llm.ToolCallPolicy
 }
 
 // AgentOption configures an Agent.
@@ -76,6 +77,15 @@ func WithReasoningConfig(cfg llm.ReasoningConfig) AgentOption {
 	}
 }
 
+// WithToolCallPolicy configures provider-agnostic structured tool-call
+// constraints and recovery behavior for every LLM call made by the agent.
+func WithToolCallPolicy(policy llm.ToolCallPolicy) AgentOption {
+	return func(a *Agent) {
+		normalized := policy.Normalize()
+		a.toolCallPolicy = &normalized
+	}
+}
+
 // NewAgent creates an Agent with the given provider, memory, registry, and options.
 func NewAgent(provider llm.Provider, mem *Memory, registry *tool.Registry, opts ...AgentOption) *Agent {
 	a := &Agent{
@@ -109,15 +119,19 @@ func (a *Agent) Run(ctx context.Context, input string) (*Result, error) {
 	a.lastToolResults, _ = a.memory.LastToolResults()
 
 	if a.tracer != nil {
-		a.tracer.FinalizeSnapshot(finalResult)
+		if finalResult != nil {
+			a.tracer.FinalizeSnapshot(finalResult)
+		}
 		if err := a.tracer.Flush(); err != nil {
 			// Flush failure is non-fatal; log and continue.
 			_ = err
 		}
 	}
 	if a.summarizer != nil {
-		summary.totalInputTokens = finalResult.TotalInputTokens
-		summary.totalOutputTokens = finalResult.TotalOutputTokens
+		if finalResult != nil {
+			summary.totalInputTokens = finalResult.TotalInputTokens
+			summary.totalOutputTokens = finalResult.TotalOutputTokens
+		}
 		a.summarizer.Log(ctx, summary)
 	}
 

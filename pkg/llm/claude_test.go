@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
@@ -70,7 +71,7 @@ func TestConvertMessagesUnknownRole(t *testing.T) {
 }
 
 func TestConvertToolsToSDK(t *testing.T) {
-	result := convertToolsToSDK(testTools)
+	result := convertToolsToSDK(testTools, true)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(result))
 	}
@@ -79,6 +80,9 @@ func TestConvertToolsToSDK(t *testing.T) {
 	}
 	if result[0].OfTool.Name != "get_weather" {
 		t.Fatalf("expected get_weather, got %s", result[0].OfTool.Name)
+	}
+	if !result[0].OfTool.Strict.Valid() || !result[0].OfTool.Strict.Value {
+		t.Fatal("expected strict schema to be enabled")
 	}
 }
 
@@ -104,6 +108,40 @@ func TestConvertResponseFromSDKNativeThinking(t *testing.T) {
 	}
 	if resp.InputTokens != 12 || resp.OutputTokens != 6 {
 		t.Fatalf("unexpected token usage: %d/%d", resp.InputTokens, resp.OutputTokens)
+	}
+}
+
+func TestConvertResponseFromSDKPreservesRawToolArguments(t *testing.T) {
+	msg := &anthropic.Message{
+		StopReason: "tool_use",
+		Content: []anthropic.ContentBlockUnion{
+			{Type: "tool_use", ID: "call_1", Name: "get_weather", Input: json.RawMessage("```json\n{\"location\":\"Tokyo\",}\n```")},
+		},
+	}
+
+	resp := convertResponseFromSDK(msg, ReasoningParseModeNone)
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].Input["location"] != "Tokyo" {
+		t.Fatalf("expected repaired tool input, got %#v", resp.ToolCalls[0].Input)
+	}
+}
+
+func TestResolveClaudeToolChoice(t *testing.T) {
+	choice := resolveClaudeToolChoice(&ToolCallPolicy{
+		Choice:          ToolChoiceSpecific,
+		ToolName:        "get_weather",
+		DisableParallel: true,
+	})
+	if choice.OfTool == nil {
+		t.Fatalf("expected specific tool choice, got %#v", choice)
+	}
+	if choice.OfTool.Name != "get_weather" {
+		t.Fatalf("expected get_weather, got %q", choice.OfTool.Name)
+	}
+	if !choice.OfTool.DisableParallelToolUse.Valid() || !choice.OfTool.DisableParallelToolUse.Value {
+		t.Fatal("expected parallel tool use to be disabled")
 	}
 }
 

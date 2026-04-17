@@ -29,7 +29,7 @@ var (
 	flagProvider        = flag.String("provider", "minimax", "Provider: claude, minimax, deepseek, doubao, kimi, glm, gpt")
 	flagAPIKey          = flag.String("api-key", "", "API key (or set MINIMAX_API_KEY / ANTHROPIC_API_KEY env var)")
 	flagBaseURL         = flag.String("base-url", "", "Custom API base URL (e.g. for proxy/relay)")
-	flagModel           = flag.String("model", "", "Override model name (currently claude only; can also use ANTHROPIC_MODEL)")
+	flagModel           = flag.String("model", "", "Override model name for the selected provider")
 	flagReasoningMode   = flag.String("reasoning-mode", "auto", "Reasoning parsing mode: auto, none, think-tag, native")
 	flagThinkingMode    = flag.String("thinking-mode", "", "Provider thinking mode override: on, off, auto (empty keeps provider default)")
 	flagThinkingEffort  = flag.String("thinking-effort", "", "Provider thinking effort override: low, medium, high, max")
@@ -468,6 +468,9 @@ func newStreamProvider(providerFlag, apiKey, baseURL, modelName, reasoningModeFl
 		if baseURL != "" {
 			opts = append(opts, llm.MiniMaxWithBaseURL(baseURL))
 		}
+		if model := firstNonEmpty(modelName, os.Getenv("MINIMAX_MODEL")); model != "" {
+			opts = append(opts, llm.MiniMaxWithModel(model))
+		}
 		if reasoningModeSet {
 			opts = append(opts, llm.MiniMaxWithReasoningMode(reasoningMode))
 		}
@@ -500,6 +503,9 @@ func newStreamProvider(providerFlag, apiKey, baseURL, modelName, reasoningModeFl
 		if baseURL != "" {
 			opts = append(opts, llm.DeepseekWithBaseURL(baseURL))
 		}
+		if model := firstNonEmpty(modelName, os.Getenv("DEEPSEEK_MODEL")); model != "" {
+			opts = append(opts, llm.DeepseekWithModel(model))
+		}
 		if reasoningModeSet {
 			opts = append(opts, llm.DeepseekWithReasoningMode(reasoningMode))
 		}
@@ -513,7 +519,7 @@ func newStreamProvider(providerFlag, apiKey, baseURL, modelName, reasoningModeFl
 			os.Exit(1)
 		}
 		opts = append(opts, llm.DoubaoWithAPIKey(key))
-		if model := os.Getenv("ARK_MODEL"); model != "" {
+		if model := firstNonEmpty(modelName, os.Getenv("ARK_MODEL")); model != "" {
 			opts = append(opts, llm.DoubaoWithModel(model))
 		}
 		if baseURL != "" {
@@ -535,6 +541,9 @@ func newStreamProvider(providerFlag, apiKey, baseURL, modelName, reasoningModeFl
 		if baseURL != "" {
 			opts = append(opts, llm.KimiWithBaseURL(baseURL))
 		}
+		if model := firstNonEmpty(modelName, os.Getenv("MOONSHOT_MODEL")); model != "" {
+			opts = append(opts, llm.KimiWithModel(model))
+		}
 		if reasoningModeSet {
 			opts = append(opts, llm.KimiWithReasoningMode(reasoningMode))
 		}
@@ -551,6 +560,9 @@ func newStreamProvider(providerFlag, apiKey, baseURL, modelName, reasoningModeFl
 		if baseURL != "" {
 			opts = append(opts, llm.GLMWithBaseURL(baseURL))
 		}
+		if model := firstNonEmpty(modelName, os.Getenv("GLM_MODEL")); model != "" {
+			opts = append(opts, llm.GLMWithModel(model))
+		}
 		if reasoningModeSet {
 			opts = append(opts, llm.GLMWithReasoningMode(reasoningMode))
 		}
@@ -566,6 +578,9 @@ func newStreamProvider(providerFlag, apiKey, baseURL, modelName, reasoningModeFl
 		opts = append(opts, llm.GPTWithAPIKey(key))
 		if baseURL != "" {
 			opts = append(opts, llm.GPTWithBaseURL(baseURL))
+		}
+		if model := firstNonEmpty(modelName, os.Getenv("OPENAI_MODEL")); model != "" {
+			opts = append(opts, llm.GPTWithModel(model))
 		}
 		if reasoningModeSet {
 			opts = append(opts, llm.GPTWithReasoningMode(reasoningMode))

@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -61,10 +60,14 @@ func (a *Agent) runLoop(ctx context.Context, result *Result, summary *RunSummary
 			return nil, tc.err
 		}
 
-		tc = a.logResponse(tc)
-		tc = a.storeMemory(tc)
+		tc = a.normalizeToolResponse(ctx, tc)
+		if tc.err != nil {
+			return nil, tc.err
+		}
 
+		tc = a.logResponse(tc)
 		tc = a.route(tc)
+		tc = a.storeMemory(tc)
 		if tc.isDone {
 			return tc.result, tc.err
 		}
@@ -108,10 +111,11 @@ func (a *Agent) callLLM(ctx context.Context, tc *TurnContext) *TurnContext {
 	}
 
 	params := llm.ChatParams{
-		System:    a.memory.SystemPrompt(),
-		Messages:  tc.messages,
-		Tools:     a.registry.Definitions(),
-		Reasoning: a.reasoningConfig,
+		System:     a.memory.SystemPrompt(),
+		Messages:   tc.messages,
+		Tools:      a.registry.Definitions(),
+		ToolPolicy: a.toolCallPolicyForMessages(tc.messages),
+		Reasoning:  a.reasoningConfig,
 	}
 
 	var resp *llm.Response
@@ -203,7 +207,11 @@ func (a *Agent) storeMemory(tc *TurnContext) *TurnContext {
 // route examines the LLM response and decides the next action.
 // Sets tc.isDone=true when returning final output or an error.
 func (a *Agent) route(tc *TurnContext) *TurnContext {
-	decision := a.router.Route(tc.response)
+	decision := tc.decision
+	if decision == nil {
+		d := a.router.Route(tc.response, a.toolCallPolicyForMessages(tc.messages))
+		decision = &d
+	}
 
 	switch decision.Action {
 	case ActionFinal:
@@ -214,6 +222,10 @@ func (a *Agent) route(tc *TurnContext) *TurnContext {
 
 	case ActionToolCall:
 		tc.toolCalls = decision.ToolCalls
+		tc.response.ToolCalls = make([]schema.ToolCall, len(decision.ToolCalls))
+		for i, validated := range decision.ToolCalls {
+			tc.response.ToolCalls[i] = validated.Call
+		}
 
 	case ActionError:
 		tc.err = fmt.Errorf("routing error (turn %d): %w", tc.turn, decision.Error)
@@ -377,13 +389,7 @@ func (acc *streamAccumulator) toResponse() *llm.Response {
 	sorted := make([]schema.ToolCall, 0, len(acc.toolCalls))
 	for i := 0; i < len(acc.toolCalls); i++ {
 		if tc, ok := acc.toolCalls[i]; ok {
-			var input map[string]interface{}
-			json.Unmarshal([]byte(tc.arguments), &input)
-			sorted = append(sorted, schema.ToolCall{
-				ID:    tc.id,
-				Name:  tc.name,
-				Input: input,
-			})
+			sorted = append(sorted, llm.NewToolCallFromRaw(tc.id, tc.name, tc.arguments))
 		}
 	}
 	return &llm.Response{

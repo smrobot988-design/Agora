@@ -30,7 +30,7 @@ func newTestRegistry(t *testing.T) *tool.Registry {
 func TestRouteEndTurn(t *testing.T) {
 	router := NewRouter(newTestRegistry(t))
 	resp := &llm.Response{StopReason: llm.StopReasonEndTurn, Text: "Hello!"}
-	d := router.Route(resp)
+	d := router.Route(resp, nil)
 	if d.Action != ActionFinal {
 		t.Fatalf("expected ActionFinal, got %s", d.Action)
 	}
@@ -47,7 +47,7 @@ func TestRouteToolUse(t *testing.T) {
 			{ID: "c1", Name: "get_weather", Input: map[string]interface{}{"city": "Tokyo"}},
 		},
 	}
-	d := router.Route(resp)
+	d := router.Route(resp, nil)
 	if d.Action != ActionToolCall {
 		t.Fatalf("expected ActionToolCall, got %s", d.Action)
 	}
@@ -70,7 +70,7 @@ func TestRouteToolUseUnknownTool(t *testing.T) {
 			{ID: "c1", Name: "nonexistent"},
 		},
 	}
-	d := router.Route(resp)
+	d := router.Route(resp, nil)
 	if d.Action != ActionError {
 		t.Fatalf("expected ActionError, got %s", d.Action)
 	}
@@ -82,7 +82,7 @@ func TestRouteToolUseUnknownTool(t *testing.T) {
 func TestRouteMaxTokens(t *testing.T) {
 	router := NewRouter(newTestRegistry(t))
 	resp := &llm.Response{StopReason: llm.StopReasonMaxTokens}
-	d := router.Route(resp)
+	d := router.Route(resp, nil)
 	if d.Action != ActionError {
 		t.Fatalf("expected ActionError, got %s", d.Action)
 	}
@@ -91,7 +91,7 @@ func TestRouteMaxTokens(t *testing.T) {
 func TestRouteUnknownStopReason(t *testing.T) {
 	router := NewRouter(newTestRegistry(t))
 	resp := &llm.Response{StopReason: "unknown_reason"}
-	d := router.Route(resp)
+	d := router.Route(resp, nil)
 	if d.Action != ActionError {
 		t.Fatalf("expected ActionError, got %s", d.Action)
 	}
@@ -103,7 +103,7 @@ func TestRouteToolUseEmptyCalls(t *testing.T) {
 		StopReason: llm.StopReasonToolUse,
 		ToolCalls:  []schema.ToolCall{},
 	}
-	d := router.Route(resp)
+	d := router.Route(resp, nil)
 	if d.Action != ActionError {
 		t.Fatalf("expected ActionError, got %s", d.Action)
 	}
@@ -118,11 +118,50 @@ func TestRouteMultipleToolCalls(t *testing.T) {
 			{ID: "c2", Name: "read_file"},
 		},
 	}
-	d := router.Route(resp)
+	d := router.Route(resp, nil)
 	if d.Action != ActionToolCall {
 		t.Fatalf("expected ActionToolCall, got %s", d.Action)
 	}
 	if len(d.ToolCalls) != 2 {
 		t.Fatalf("expected 2 tool calls, got %d", len(d.ToolCalls))
+	}
+}
+
+func TestRouteToolUseMissingRequiredArgument(t *testing.T) {
+	registry := tool.NewRegistry()
+	_ = registry.Register(&tool.Func{
+		Def: schema.ToolDefinition{
+			Name:        "get_weather",
+			Description: "Get weather",
+			InputSchema: schema.PropertySchema{
+				Properties: map[string]interface{}{
+					"location": map[string]interface{}{"type": "string"},
+				},
+				Required: []string{"location"},
+			},
+		},
+		Handler: func(ctx context.Context, input map[string]interface{}) (string, error) {
+			return "ok", nil
+		},
+	})
+	router := NewRouter(registry)
+	resp := &llm.Response{
+		StopReason: llm.StopReasonToolUse,
+		ToolCalls: []schema.ToolCall{
+			{ID: "c1", Name: "get_weather", Input: map[string]interface{}{}},
+		},
+	}
+	d := router.Route(resp, nil)
+	if d.Action != ActionError {
+		t.Fatalf("expected ActionError, got %s", d.Action)
+	}
+}
+
+func TestRouteRequiresSpecificToolCall(t *testing.T) {
+	router := NewRouter(newTestRegistry(t))
+	resp := &llm.Response{StopReason: llm.StopReasonEndTurn, Text: "I will just answer directly"}
+	d := router.Route(resp, &llm.ToolCallPolicy{Choice: llm.ToolChoiceSpecific, ToolName: "get_weather"})
+	if d.Action != ActionError {
+		t.Fatalf("expected ActionError, got %s", d.Action)
 	}
 }

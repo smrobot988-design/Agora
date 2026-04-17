@@ -2,12 +2,12 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/smrobot988-design/Agora/pkg/schema"
 )
 
@@ -102,7 +102,8 @@ func (p *ClaudeProvider) Chat(ctx context.Context, chatParams ChatParams) (*Resp
 		}
 	}
 	if len(chatParams.Tools) > 0 {
-		params.Tools = convertToolsToSDK(chatParams.Tools)
+		params.Tools = convertToolsToSDK(chatParams.Tools, normalizeToolCallPolicy(chatParams.ToolPolicy).StrictSchema)
+		params.ToolChoice = resolveClaudeToolChoice(chatParams.ToolPolicy)
 	}
 	if resolution.useThinking {
 		params.Thinking = resolution.thinking
@@ -141,7 +142,8 @@ func (p *ClaudeProvider) ChatStream(ctx context.Context, params ChatParams, cb f
 		sdkParams.System = []anthropic.TextBlockParam{{Text: params.System}}
 	}
 	if len(params.Tools) > 0 {
-		sdkParams.Tools = convertToolsToSDK(params.Tools)
+		sdkParams.Tools = convertToolsToSDK(params.Tools, normalizeToolCallPolicy(params.ToolPolicy).StrictSchema)
+		sdkParams.ToolChoice = resolveClaudeToolChoice(params.ToolPolicy)
 	}
 	if resolution.useThinking {
 		sdkParams.Thinking = resolution.thinking
@@ -301,13 +303,14 @@ func convertMessagesToSDK(messages []Message) ([]anthropic.MessageParam, error) 
 }
 
 // convertToolsToSDK converts our ToolDefinition slice to SDK ToolUnionParam slice.
-func convertToolsToSDK(tools []schema.ToolDefinition) []anthropic.ToolUnionParam {
+func convertToolsToSDK(tools []schema.ToolDefinition, strict bool) []anthropic.ToolUnionParam {
 	result := make([]anthropic.ToolUnionParam, len(tools))
 	for i, t := range tools {
 		result[i] = anthropic.ToolUnionParam{
 			OfTool: &anthropic.ToolParam{
 				Name:        t.Name,
 				Description: anthropic.String(t.Description),
+				Strict:      param.NewOpt(strict),
 				InputSchema: anthropic.ToolInputSchemaParam{
 					Properties: t.InputSchema.Properties,
 					Required:   t.InputSchema.Required,
@@ -339,17 +342,39 @@ func convertResponseFromSDK(msg *anthropic.Message, parseMode ReasoningParseMode
 				resp.ReasoningText += block.Thinking
 			}
 		case BlockToolUse:
-			inputMap := make(map[string]interface{})
-			if len(block.Input) > 0 {
-				json.Unmarshal(block.Input, &inputMap)
-			}
-			resp.ToolCalls = append(resp.ToolCalls, schema.ToolCall{
-				ID:    block.ID,
-				Name:  block.Name,
-				Input: inputMap,
-			})
+			resp.ToolCalls = append(resp.ToolCalls, newToolCall(block.ID, block.Name, string(block.Input)))
 		}
 	}
 
 	return resp
+}
+
+func resolveClaudeToolChoice(policy *ToolCallPolicy) anthropic.ToolChoiceUnionParam {
+	normalized := normalizeToolCallPolicy(policy)
+	switch normalized.Choice {
+	case ToolChoiceRequired:
+		return anthropic.ToolChoiceUnionParam{
+			OfAny: &anthropic.ToolChoiceAnyParam{
+				DisableParallelToolUse: param.NewOpt(normalized.DisableParallel),
+			},
+		}
+	case ToolChoiceSpecific:
+		choice := anthropic.ToolChoiceParamOfTool(normalized.ToolName)
+		if choice.OfTool != nil {
+			choice.OfTool.DisableParallelToolUse = param.NewOpt(normalized.DisableParallel)
+		}
+		return choice
+	case ToolChoiceNone:
+		none := anthropic.NewToolChoiceNoneParam()
+		return anthropic.ToolChoiceUnionParam{OfNone: &none}
+	default:
+		if normalized.DisableParallel {
+			return anthropic.ToolChoiceUnionParam{
+				OfAuto: &anthropic.ToolChoiceAutoParam{
+					DisableParallelToolUse: param.NewOpt(true),
+				},
+			}
+		}
+		return anthropic.ToolChoiceUnionParam{}
+	}
 }

@@ -103,7 +103,7 @@ func TestConvertToolsToOpenAI(t *testing.T) {
 			},
 		},
 	}
-	result := convertToolsToGoOpenAI(tools)
+	result := convertToolsToGoOpenAI(tools, true)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(result))
 	}
@@ -112,6 +112,9 @@ func TestConvertToolsToOpenAI(t *testing.T) {
 	}
 	if result[0].Function.Name != "get_weather" {
 		t.Fatalf("expected name 'get_weather', got %s", result[0].Function.Name)
+	}
+	if !result[0].Function.Strict {
+		t.Fatal("expected strict schema to be enabled")
 	}
 }
 
@@ -155,5 +158,62 @@ func TestConvertResponseFromGoOpenAINativeReasoning(t *testing.T) {
 	}
 	if result.ReasoningText != "hidden" {
 		t.Fatalf("expected native reasoning text, got %q", result.ReasoningText)
+	}
+}
+
+func TestConvertResponseFromGoOpenAIPreservesRawToolArguments(t *testing.T) {
+	resp := openai.ChatCompletionResponse{
+		Choices: []openai.ChatCompletionChoice{
+			{
+				FinishReason: "tool_calls",
+				Message: openai.ChatCompletionMessage{
+					ToolCalls: []openai.ToolCall{
+						{
+							ID:   "call_1",
+							Type: openai.ToolTypeFunction,
+							Function: openai.FunctionCall{
+								Name:      "get_weather",
+								Arguments: "```json\n{\"location\":\"Tokyo\",}\n```",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := convertResponseFromGoOpenAI(resp, ReasoningModeNone)
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.ToolCalls))
+	}
+	if result.ToolCalls[0].RawArguments == "" {
+		t.Fatal("expected raw arguments to be preserved")
+	}
+	if result.ToolCalls[0].Input["location"] != "Tokyo" {
+		t.Fatalf("expected repaired JSON arguments, got %#v", result.ToolCalls[0].Input)
+	}
+	if result.ToolCalls[0].ParseError != "" {
+		t.Fatalf("expected parse repair to succeed, got %q", result.ToolCalls[0].ParseError)
+	}
+}
+
+func TestApplyOpenAIToolPolicy(t *testing.T) {
+	req := openai.ChatCompletionRequest{}
+	applyOpenAIToolPolicy(&req, &ToolCallPolicy{
+		Choice:          ToolChoiceSpecific,
+		ToolName:        "get_weather",
+		DisableParallel: true,
+	})
+
+	choice, ok := req.ToolChoice.(openai.ToolChoice)
+	if !ok {
+		t.Fatalf("expected ToolChoice struct, got %#v", req.ToolChoice)
+	}
+	if choice.Function.Name != "get_weather" {
+		t.Fatalf("expected get_weather tool choice, got %q", choice.Function.Name)
+	}
+	parallel, ok := req.ParallelToolCalls.(bool)
+	if !ok || parallel {
+		t.Fatalf("expected parallel tool calls to be disabled, got %#v", req.ParallelToolCalls)
 	}
 }
