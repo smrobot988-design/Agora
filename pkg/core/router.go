@@ -50,6 +50,7 @@ const (
 	ToolCallErrorMissingToolCall    ToolCallErrorCode = "missing_tool_call"
 	ToolCallErrorUnknownTool        ToolCallErrorCode = "unknown_tool"
 	ToolCallErrorWrongTool          ToolCallErrorCode = "wrong_tool"
+	ToolCallErrorToolCallsForbidden ToolCallErrorCode = "tool_calls_forbidden"
 	ToolCallErrorParallelNotAllowed ToolCallErrorCode = "parallel_tool_calls_not_allowed"
 	ToolCallErrorMalformedArguments ToolCallErrorCode = "malformed_tool_arguments"
 	ToolCallErrorInvalidArguments   ToolCallErrorCode = "invalid_tool_arguments"
@@ -133,6 +134,16 @@ func (r *Router) routeToolCalls(calls []schema.ToolCall, policy llm.ToolCallPoli
 				Code:     ToolCallErrorMissingToolCall,
 				ToolName: policy.ToolName,
 				Message:  "stop_reason is tool_use but no tool calls present",
+			},
+		}
+	}
+	if policy.Choice == llm.ToolChoiceNone {
+		return Decision{
+			Action: ActionError,
+			Error: &ToolCallError{
+				Code:    ToolCallErrorToolCallsForbidden,
+				Call:    &calls[0],
+				Message: "tool calls are disabled for this request",
 			},
 		}
 	}

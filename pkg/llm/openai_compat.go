@@ -73,10 +73,13 @@ func (p *OpenAICompatProvider) EstimateTokens(messages []Message) int {
 
 // Chat implements Provider.Chat using the OpenAI chat completions API.
 func (p *OpenAICompatProvider) Chat(ctx context.Context, chatParams ChatParams) (*Response, error) {
-	req, resolution := p.buildChatCompletionRequest(chatParams, false)
+	req, resolution, err := p.buildChatCompletionRequest(chatParams, false)
+	if err != nil {
+		return nil, fmt.Errorf("%s request: %w", p.name, err)
+	}
 	if len(chatParams.Tools) > 0 {
 		req.Tools = convertToolsToGoOpenAI(chatParams.Tools, normalizeToolCallPolicy(chatParams.ToolPolicy).StrictSchema)
-		applyOpenAIToolPolicy(&req, chatParams.ToolPolicy)
+		applyOpenAIToolPolicy(&req, chatParams.ToolPolicy, p.name, resolution.model)
 	}
 	if chatParams.System != "" {
 		req.Messages = append([]openai.ChatCompletionMessage{
@@ -95,10 +98,13 @@ func (p *OpenAICompatProvider) Chat(ctx context.Context, chatParams ChatParams) 
 
 // ChatStream implements Provider.ChatStream using OpenAI-compatible streaming.
 func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatParams, cb func(*PartialResponse)) error {
-	req, resolution := p.buildChatCompletionRequest(chatParams, true)
+	req, resolution, err := p.buildChatCompletionRequest(chatParams, true)
+	if err != nil {
+		return fmt.Errorf("%s request: %w", p.name, err)
+	}
 	if len(chatParams.Tools) > 0 {
 		req.Tools = convertToolsToGoOpenAI(chatParams.Tools, normalizeToolCallPolicy(chatParams.ToolPolicy).StrictSchema)
-		applyOpenAIToolPolicy(&req, chatParams.ToolPolicy)
+		applyOpenAIToolPolicy(&req, chatParams.ToolPolicy, p.name, resolution.model)
 	}
 	if chatParams.System != "" {
 		req.Messages = append([]openai.ChatCompletionMessage{
@@ -183,7 +189,7 @@ func (p *OpenAICompatProvider) ChatStream(ctx context.Context, chatParams ChatPa
 	}
 }
 
-func (p *OpenAICompatProvider) buildChatCompletionRequest(chatParams ChatParams, stream bool) (openai.ChatCompletionRequest, openAIReasoningResolution) {
+func (p *OpenAICompatProvider) buildChatCompletionRequest(chatParams ChatParams, stream bool) (openai.ChatCompletionRequest, openAIReasoningResolution, error) {
 	resolution := resolveOpenAICompatReasoning(p.name, p.model, p.reasoningMode, chatParams.Reasoning)
 	req := openai.ChatCompletionRequest{
 		Model:               resolution.model,
@@ -194,7 +200,10 @@ func (p *OpenAICompatProvider) buildChatCompletionRequest(chatParams ChatParams,
 	if resolution.reasoningEffort != "" {
 		req.ReasoningEffort = resolution.reasoningEffort
 	}
-	return req, resolution
+	if err := applyOpenAIResponseFormat(&req, chatParams.ResponseFormat); err != nil {
+		return openai.ChatCompletionRequest{}, resolution, err
+	}
+	return req, resolution, nil
 }
 
 // ============================================================================
@@ -332,7 +341,25 @@ func convertResponseFromGoOpenAI(resp openai.ChatCompletionResponse, mode Reason
 	return result
 }
 
-func applyOpenAIToolPolicy(req *openai.ChatCompletionRequest, policy *ToolCallPolicy) {
+func applyOpenAIResponseFormat(req *openai.ChatCompletionRequest, format *ResponseFormat) error {
+	if format == nil {
+		return nil
+	}
+	switch format.Type {
+	case ResponseFormatJSONObject:
+		req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported response format type %q", format.Type)
+	}
+}
+
+func applyOpenAIToolPolicy(req *openai.ChatCompletionRequest, policy *ToolCallPolicy, providerName, model string) {
+	if suppressOpenAIToolPolicy(providerName, model) {
+		return
+	}
 	normalized := normalizeToolCallPolicy(policy)
 	switch normalized.Choice {
 	case ToolChoiceRequired:
@@ -350,6 +377,10 @@ func applyOpenAIToolPolicy(req *openai.ChatCompletionRequest, policy *ToolCallPo
 	if normalized.DisableParallel {
 		req.ParallelToolCalls = false
 	}
+}
+
+func suppressOpenAIToolPolicy(providerName, model string) bool {
+	return providerName == "deepseek" && model == "deepseek-reasoner"
 }
 
 func emitClassifiedSegments(cb func(*PartialResponse), segments []contentSegment) {

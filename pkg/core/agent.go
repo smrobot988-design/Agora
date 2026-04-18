@@ -28,6 +28,7 @@ type Agent struct {
 	lastToolResults []llm.ToolResult
 	reasoningConfig *llm.ReasoningConfig
 	toolCallPolicy  *llm.ToolCallPolicy
+	responseFormat  *llm.ResponseFormat
 }
 
 // AgentOption configures an Agent.
@@ -83,6 +84,15 @@ func WithToolCallPolicy(policy llm.ToolCallPolicy) AgentOption {
 	return func(a *Agent) {
 		normalized := policy.Normalize()
 		a.toolCallPolicy = &normalized
+	}
+}
+
+// WithResponseFormat configures provider-side structured text output for every
+// LLM call made by the agent. A nil/zero value preserves provider defaults.
+func WithResponseFormat(format llm.ResponseFormat) AgentOption {
+	return func(a *Agent) {
+		copied := format
+		a.responseFormat = &copied
 	}
 }
 

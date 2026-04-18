@@ -127,6 +127,27 @@ func TestRouteMultipleToolCalls(t *testing.T) {
 	}
 }
 
+func TestRouteRejectsToolCallsWhenToolsDisabled(t *testing.T) {
+	router := NewRouter(newTestRegistry(t))
+	resp := &llm.Response{
+		StopReason: llm.StopReasonToolUse,
+		ToolCalls: []schema.ToolCall{
+			{ID: "c1", Name: "get_weather"},
+		},
+	}
+	d := router.Route(resp, &llm.ToolCallPolicy{Choice: llm.ToolChoiceNone})
+	if d.Action != ActionError {
+		t.Fatalf("expected ActionError, got %s", d.Action)
+	}
+	toolErr, ok := d.Error.(*ToolCallError)
+	if !ok {
+		t.Fatalf("expected ToolCallError, got %#v", d.Error)
+	}
+	if toolErr.Code != ToolCallErrorToolCallsForbidden {
+		t.Fatalf("expected forbidden error, got %s", toolErr.Code)
+	}
+}
+
 func TestRouteToolUseMissingRequiredArgument(t *testing.T) {
 	registry := tool.NewRegistry()
 	_ = registry.Register(&tool.Func{

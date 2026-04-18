@@ -100,11 +100,12 @@ func (r *Response) TotalTokens() int {
 
 // ChatParams holds all per-request parameters for a Chat call.
 type ChatParams struct {
-	System     string                  `json:"system,omitempty"`
-	Messages   []Message               `json:"messages"`
-	Tools      []schema.ToolDefinition `json:"tools,omitempty"`
-	ToolPolicy *ToolCallPolicy         `json:"tool_policy,omitempty"`
-	Reasoning  *ReasoningConfig        `json:"reasoning,omitempty"`
+	System         string                  `json:"system,omitempty"`
+	Messages       []Message               `json:"messages"`
+	Tools          []schema.ToolDefinition `json:"tools,omitempty"`
+	ToolPolicy     *ToolCallPolicy         `json:"tool_policy,omitempty"`
+	Reasoning      *ReasoningConfig        `json:"reasoning,omitempty"`
+	ResponseFormat *ResponseFormat         `json:"response_format,omitempty"`
 }
 
 // Provider is the unified interface for LLM providers.

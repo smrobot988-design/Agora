@@ -362,6 +362,83 @@ func TestAgentPassesReasoningConfig(t *testing.T) {
 	}
 }
 
+func TestAgentPassesResponseFormat(t *testing.T) {
+	provider := &mockProvider{responses: []*llm.Response{
+		{StopReason: llm.StopReasonEndTurn, Text: `{"ok":true}`},
+	}}
+	mem := NewMemory()
+	registry := tool.NewRegistry()
+
+	agent := NewAgent(provider, mem, registry, WithResponseFormat(llm.ResponseFormat{
+		Type: llm.ResponseFormatJSONObject,
+	}))
+	if _, err := agent.Run(context.Background(), "Return json"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if provider.lastParams.ResponseFormat == nil {
+		t.Fatal("expected response format to be forwarded")
+	}
+	if provider.lastParams.ResponseFormat.Type != llm.ResponseFormatJSONObject {
+		t.Fatalf("expected json_object response format, got %s", provider.lastParams.ResponseFormat.Type)
+	}
+}
+
+func TestAgentPassesResponseFormatToToolRepair(t *testing.T) {
+	provider := &mockProvider{responses: []*llm.Response{
+		{
+			StopReason: llm.StopReasonToolUse,
+			ToolCalls: []schema.ToolCall{
+				{ID: "bad_1", Name: "echo", Input: map[string]interface{}{}},
+			},
+		},
+		{
+			StopReason: llm.StopReasonToolUse,
+			ToolCalls: []schema.ToolCall{
+				{ID: "good_1", Name: "echo", Input: map[string]interface{}{"message": "world"}},
+			},
+		},
+		{
+			StopReason: llm.StopReasonEndTurn,
+			Text:       "done",
+		},
+	}}
+	registry := tool.NewRegistry()
+	_ = registry.Register(&tool.Func{
+		Def: schema.ToolDefinition{
+			Name:        "echo",
+			Description: "Echo the message",
+			InputSchema: schema.PropertySchema{
+				Properties: map[string]interface{}{
+					"message": map[string]interface{}{"type": "string"},
+				},
+				Required: []string{"message"},
+			},
+		},
+		Handler: func(ctx context.Context, input map[string]interface{}) (string, error) {
+			msg, _ := input["message"].(string)
+			return msg, nil
+		},
+	})
+	mem := NewMemory()
+	agent := NewAgent(provider, mem, registry, WithResponseFormat(llm.ResponseFormat{
+		Type: llm.ResponseFormatJSONObject,
+	}))
+
+	if _, err := agent.Run(context.Background(), "Echo world"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(provider.paramsHistory) < 2 {
+		t.Fatalf("expected repair call, got %#v", provider.paramsHistory)
+	}
+	if provider.paramsHistory[1].ResponseFormat == nil {
+		t.Fatal("expected response format on repair call")
+	}
+	if provider.paramsHistory[1].ResponseFormat.Type != llm.ResponseFormatJSONObject {
+		t.Fatalf("expected json_object on repair call, got %s", provider.paramsHistory[1].ResponseFormat.Type)
+	}
+}
+
 func TestAgentRepairsInvalidToolArguments(t *testing.T) {
 	provider := &mockProvider{responses: []*llm.Response{
 		{

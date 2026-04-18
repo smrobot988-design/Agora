@@ -203,7 +203,7 @@ func TestApplyOpenAIToolPolicy(t *testing.T) {
 		Choice:          ToolChoiceSpecific,
 		ToolName:        "get_weather",
 		DisableParallel: true,
-	})
+	}, "deepseek", "deepseek-chat")
 
 	choice, ok := req.ToolChoice.(openai.ToolChoice)
 	if !ok {
@@ -215,5 +215,94 @@ func TestApplyOpenAIToolPolicy(t *testing.T) {
 	parallel, ok := req.ParallelToolCalls.(bool)
 	if !ok || parallel {
 		t.Fatalf("expected parallel tool calls to be disabled, got %#v", req.ParallelToolCalls)
+	}
+}
+
+func TestApplyOpenAIToolPolicySuppressesDeepSeekReasonerToolChoice(t *testing.T) {
+	req := openai.ChatCompletionRequest{}
+	applyOpenAIToolPolicy(&req, &ToolCallPolicy{
+		Choice:          ToolChoiceSpecific,
+		ToolName:        "get_weather",
+		DisableParallel: true,
+	}, "deepseek", "deepseek-reasoner")
+
+	if req.ToolChoice != nil {
+		t.Fatalf("expected tool_choice to be suppressed, got %#v", req.ToolChoice)
+	}
+	if req.ParallelToolCalls != nil {
+		t.Fatalf("expected parallel_tool_calls to be suppressed, got %#v", req.ParallelToolCalls)
+	}
+}
+
+func TestBuildChatCompletionRequestDeepSeekThinkingSuppressesToolChoice(t *testing.T) {
+	provider := NewOpenAICompatProvider(OpenAICompatConfig{
+		Name:      "deepseek",
+		Model:     "deepseek-chat",
+		MaxTokens: 4096,
+	})
+
+	req, resolution, err := provider.buildChatCompletionRequest(ChatParams{
+		Messages: []Message{NewTextMessage(RoleUser, "hi")},
+		Reasoning: &ReasoningConfig{
+			Mode: ThinkingModeOn,
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if resolution.model != "deepseek-reasoner" {
+		t.Fatalf("expected deepseek-reasoner model, got %q", resolution.model)
+	}
+
+	applyOpenAIToolPolicy(&req, &ToolCallPolicy{
+		Choice:          ToolChoiceSpecific,
+		ToolName:        "get_weather",
+		DisableParallel: true,
+	}, provider.name, resolution.model)
+
+	if req.ToolChoice != nil {
+		t.Fatalf("expected reasoning path tool_choice to be suppressed, got %#v", req.ToolChoice)
+	}
+}
+
+func TestBuildChatCompletionRequestAppliesJSONResponseFormat(t *testing.T) {
+	provider := NewOpenAICompatProvider(OpenAICompatConfig{
+		Name:      "deepseek",
+		Model:     "deepseek-reasoner",
+		MaxTokens: 4096,
+	})
+
+	req, _, err := provider.buildChatCompletionRequest(ChatParams{
+		Messages: []Message{NewTextMessage(RoleUser, "return json")},
+		ResponseFormat: &ResponseFormat{
+			Type: ResponseFormatJSONObject,
+		},
+	}, false)
+	if err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if req.ResponseFormat == nil {
+		t.Fatal("expected response_format to be set")
+	}
+	if req.ResponseFormat.Type != openai.ChatCompletionResponseFormatTypeJSONObject {
+		t.Fatalf("expected json_object response format, got %q", req.ResponseFormat.Type)
+	}
+}
+
+func TestBuildChatCompletionRequestRejectsUnsupportedResponseFormat(t *testing.T) {
+	provider := NewOpenAICompatProvider(OpenAICompatConfig{
+		Name:      "deepseek",
+		Model:     "deepseek-chat",
+		MaxTokens: 4096,
+	})
+
+	_, _, err := provider.buildChatCompletionRequest(ChatParams{
+		Messages: []Message{NewTextMessage(RoleUser, "return yaml")},
+		ResponseFormat: &ResponseFormat{
+			Type: ResponseFormatType("yaml"),
+		},
+	}, false)
+	if err == nil {
+		t.Fatal("expected unsupported response format error")
 	}
 }

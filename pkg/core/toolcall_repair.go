@@ -62,11 +62,12 @@ func (a *Agent) repairToolResponse(ctx context.Context, history []llm.Message, f
 	messages = append(messages, llm.NewTextMessage(llm.RoleUser, repairPrompt))
 
 	return a.provider.Chat(ctx, llm.ChatParams{
-		System:     a.memory.SystemPrompt(),
-		Messages:   messages,
-		Tools:      a.registry.Definitions(),
-		ToolPolicy: &repairPolicy,
-		Reasoning:  a.reasoningConfig,
+		System:         a.memory.SystemPrompt(),
+		Messages:       messages,
+		Tools:          a.registry.Definitions(),
+		ToolPolicy:     &repairPolicy,
+		Reasoning:      a.reasoningConfig,
+		ResponseFormat: a.responseFormat,
 	})
 }
 
@@ -123,6 +124,16 @@ func buildToolRepairPrompt(toolErr *ToolCallError, defs []schema.ToolDefinition,
 	payload, err := json.Marshal(report)
 	if err != nil {
 		return "", fmt.Errorf("marshal repair report: %w", err)
+	}
+
+	if toolErr.Code == ToolCallErrorToolCallsForbidden {
+		return strings.TrimSpace(
+			"You previously returned a tool call that Agora rejected.\n" +
+				"You must respond with the final answer only.\n" +
+				"Do not call any tool.\n" +
+				"Do not explain the error.\n" +
+				"Failure report:\n" + string(payload),
+		), nil
 	}
 
 	return strings.TrimSpace(

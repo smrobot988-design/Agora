@@ -111,11 +111,12 @@ func (a *Agent) callLLM(ctx context.Context, tc *TurnContext) *TurnContext {
 	}
 
 	params := llm.ChatParams{
-		System:     a.memory.SystemPrompt(),
-		Messages:   tc.messages,
-		Tools:      a.registry.Definitions(),
-		ToolPolicy: a.toolCallPolicyForMessages(tc.messages),
-		Reasoning:  a.reasoningConfig,
+		System:         a.memory.SystemPrompt(),
+		Messages:       tc.messages,
+		Tools:          a.registry.Definitions(),
+		ToolPolicy:     a.toolCallPolicyForMessages(tc.messages),
+		Reasoning:      a.reasoningConfig,
+		ResponseFormat: a.responseFormat,
 	}
 
 	var resp *llm.Response
